@@ -215,3 +215,41 @@ def segmentation_metrics(
         iou=_ratio(intersection, union),
         dice=_ratio(2 * intersection, total),
     )
+
+
+def paired_bootstrap_auroc_difference(
+    scores_a: ArrayLike,
+    scores_b: ArrayLike,
+    labels: ArrayLike,
+    n_resamples: int = DEFAULT_BOOTSTRAP_RESAMPLES,
+    seed: int = DEFAULT_BOOTSTRAP_SEED,
+    confidence: float = 0.95,
+) -> tuple[float, float, float] | None:
+    """AUROC(a) - AUROC(b) on the same images, with a paired percentile bootstrap interval.
+
+    Both models scored the same images, so each resample draws the same image indices for both
+    (a paired comparison, tighter and more appropriate than comparing two separate intervals).
+    Returns (difference, low, high), or None if only one class is present or no resample has
+    both classes. An interval that excludes 0 indicates a difference beyond sampling noise on
+    this test set.
+    """
+    a, y = _scores_and_labels(scores_a, labels)
+    b, _ = _scores_and_labels(scores_b, labels)
+    if n_resamples < 1 or not 0.0 < confidence < 1.0:
+        raise EvaluationError("n_resamples must be positive and confidence in (0, 1)")
+    if not _has_both_classes(y):
+        return None
+    point = float(roc_auc_score(y, a) - roc_auc_score(y, b))
+    rng = np.random.default_rng(seed)
+    values: list[float] = []
+    for _ in range(n_resamples):
+        index = rng.integers(0, y.size, size=y.size)
+        if _has_both_classes(y[index]):
+            values.append(
+                float(roc_auc_score(y[index], a[index]) - roc_auc_score(y[index], b[index]))
+            )
+    if not values:
+        return None
+    tail = (1.0 - confidence) / 2.0 * 100.0
+    low, high = np.percentile(values, [tail, 100.0 - tail])
+    return point, float(low), float(high)

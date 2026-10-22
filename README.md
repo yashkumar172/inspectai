@@ -2,7 +2,7 @@
 
 CPU-friendly visual anomaly detection on the VisA dataset: a classical baseline, a Gaussian feature model, and a PatchCore-inspired model, with a Streamlit app. The full specification is in [SPEC.md](SPEC.md).
 
-**Status: Milestone 4 (PatchCore-inspired model) implemented.** The package contains the dataset loader, splits, preprocessing, the metrics and threshold harness, the classical OpenCV baseline (Model A), a pretrained-CNN feature extractor, the Gaussian feature model (Model B), the PatchCore-inspired model (Model C), and a checked artifact store. The Streamlit app does not exist yet; nothing under "Planned" below exists.
+**Status: Milestone 5 (comparison reports and additional categories) implemented; `fryum` and one `chewinggum` run still outstanding.** The package contains the dataset loader, splits, preprocessing, the metrics and threshold harness, the classical OpenCV baseline (Model A), a pretrained-CNN feature extractor, the Gaussian feature model (Model B), the PatchCore-inspired model (Model C), and a checked artifact store. The Streamlit app does not exist yet; nothing under "Planned" below exists.
 
 ## Requirements
 
@@ -249,11 +249,86 @@ All rows use the same seed-42 splits (fit 405 / calibration 45 / test 150 images
 
 Reading the comparison with care:
 
-- Model C has the highest image AUROC and AP in both categories and both profiles. Its intervals overlap Model B's in some cases (for example cashew `dev`: 0.922-0.981 against 0.871-0.955), and only two categories are measured, so this is a consistent ranking, not a proven significant difference.
+- In these two categories (`cashew`, `pipe_fryum`) Model C has the highest image AUROC and AP in both profiles. Its intervals overlap Model B's in some cases (for example cashew `dev`: 0.922-0.981 against 0.871-0.955); the paired comparison in the Milestone 5 section is the better test, and it also shows that this ranking does not hold in a third category (`chewinggum`).
 - Both deep models are far better than the classical baseline at image level (AUROC 0.88-0.99 against 0.67-0.70).
 - Model C does **not** improve pixel-level overlap: IoU/Dice at the calibrated pixel threshold are 0.18-0.20 / 0.31-0.34 for Model C, at or slightly below Model B (0.19-0.26 / 0.32-0.41) and slightly below the classical baseline (0.21-0.24 / 0.35-0.39) in both categories. Pixel AUROC is about 0.99 for both deep models and is inflated by the many background pixels.
 - F1 at the calibrated threshold depends on a threshold taken from only 45 calibration images, so recall is limited (0.52-0.64 for Model C) while false positives are rare. The F1 difference between `dev` and `full` for the same model is mostly this threshold effect, not ranking quality.
 - Model C costs more: about 11 minutes to fit and 0.2-0.65 s per image against 17-52 s and 0.04-0.13 s for Model B. No model has been selected as the default; that follows the evaluation protocol in a later milestone.
+
+## Comparison report (Milestone 5)
+
+```powershell
+python scripts/compare_models.py                      # all four initial categories
+python scripts/compare_models.py --categories cashew pipe_fryum --no-figures
+```
+
+`scripts/compare_models.py` reads the results that `evaluate_model.py` wrote for every model and writes `<INSPECTAI_REPORT_DIR>\comparison\`: `comparison.json` (every run's configuration, thresholds, weights and checksums, library versions, power state, and all metrics), `comparison.csv` (one flat row per category and model), `comparison.md` (tables, paired differences, macro averages, protocol, how to reproduce), and `<category>_examples.png`. Undefined metrics are written as `undefined`, never as a number.
+
+What the tool enforces rather than assumes:
+
+- **Identical splits and settings.** A category is refused (exit code 2) unless every model used the same fit / calibration / test file-list hashes, split seed, evaluated split, evaluation resolution, threshold policy and quantile, bootstrap settings, sample counts, and the same test images with the same labels.
+- **Metrics come from the actual predictions.** Every image-level metric (AUROC and its bootstrap interval, AP, confusion matrix, precision, recall, F1, FPR, FNR) is re-derived from the run's saved `predictions.csv` (per-image score and split-file label) and must match the harness summary. Pixel metrics need the full anomaly maps, so they are copied from the summaries and labeled as such.
+- **The artifact matches the report.** When making the figures, each saved artifact must reproduce the scores in its own `predictions.csv` for the displayed images, or the comparison stops.
+- **Measured versus not measured.** A model with no results for a category is listed as "not measured" and left out of the tables and macro average; it is never filled in. Categories with fewer than two measured models are listed as not compared.
+- **Paired differences.** Because all models score the same test images, the report also gives paired bootstrap 95% intervals for AUROC differences (same resampled images for both models), which are tighter and more appropriate than comparing two separate intervals.
+
+The example figures show, for every model, a normal-image pair and a small / median / large defect. Images are chosen without looking at any model output: two normal images at random (seed 42), and the anomalous images at the 15th / 50th / 85th percentile of ground-truth mask area. Each model's colors are anchored at its own pixel threshold: blue is 0, the middle of the scale is the threshold (the 99th percentile of normal calibration pixels), and red is twice the threshold.
+
+### Results by category
+
+Measured with seed-42 splits, 256x256 evaluation resolution, `normal_percentile` thresholds (q = 0.99), and 1000 bootstrap resamples. `fryum` (the fourth initial category of SPEC.md Section 3.2) has **not been run yet**, and Model C `full` has **not been run for `chewinggum`**; they are absent from the tables, not estimated. The tables below are copied from `comparison.md`.
+
+**Outstanding benchmark runs.** The batch that was meant to cover `chewinggum` and `fryum` was stopped by the operating environment because the machine ran low on memory (other applications were using RAM while the Model C fits, which peak at 1.2-2.9 GB, were running). Completed for `chewinggum`: classical, Model B `dev` and `full`, and Model C `dev`. Not run: Model C `full` for `chewinggum` (about 12 minutes) and all five configurations for `fryum` (about 27 minutes). Nothing from the interrupted batch was kept in a partial state; the missing runs are simply absent. To finish them, run the commands under "How to reproduce" in `comparison.md` for those categories with other applications closed, and then run `python scripts/compare_models.py` again; the tables, macro averages, and paired differences update automatically.
+
+#### cashew
+
+| Model | Image AUROC (95% CI) | Image AP | Pixel AUROC | Pixel IoU / Dice | Precision | Recall | FPR | F1 | Fit time | Latency |
+|---|---|---|---|---|---|---|---|---|---|---|
+| A classical | 0.701 (0.603-0.794) | 0.818 | 0.809 | 0.21 / 0.35 | 1.000 | 0.180 | 0.000 | 0.305 | 7.8 s | 14 ms |
+| B Gaussian dev | 0.916 (0.871-0.955) | 0.962 | 0.987 | 0.19 / 0.32 | 1.000 | 0.540 | 0.000 | 0.701 | 17.4 s | 39 ms |
+| B Gaussian full | 0.876 (0.818-0.928) | 0.937 | 0.990 | 0.26 / 0.41 | 1.000 | 0.140 | 0.000 | 0.246 | 50.9 s | 122 ms |
+| C PatchCore-inspired dev | 0.955 (0.922-0.981) | 0.978 | 0.990 | 0.20 / 0.34 | 1.000 | 0.580 | 0.000 | 0.734 | 649.4 s | 205 ms |
+| C PatchCore-inspired full | 0.968 (0.944-0.987) | 0.984 | 0.992 | 0.19 / 0.33 | 1.000 | 0.640 | 0.000 | 0.780 | 681.8 s | 592 ms |
+
+#### pipe_fryum
+
+| Model | Image AUROC (95% CI) | Image AP | Pixel AUROC | Pixel IoU / Dice | Precision | Recall | FPR | F1 | Fit time | Latency |
+|---|---|---|---|---|---|---|---|---|---|---|
+| A classical | 0.674 (0.587-0.759) | 0.818 | 0.963 | 0.24 / 0.39 | 1.000 | 0.080 | 0.000 | 0.148 | 7.2 s | 14 ms |
+| B Gaussian dev | 0.933 (0.885-0.967) | 0.963 | 0.992 | 0.20 / 0.34 | 0.965 | 0.550 | 0.040 | 0.701 | 16.2 s | 37 ms |
+| B Gaussian full | 0.932 (0.882-0.973) | 0.960 | 0.994 | 0.24 / 0.39 | 0.934 | 0.570 | 0.080 | 0.708 | 52.4 s | 130 ms |
+| C PatchCore-inspired dev | 0.982 (0.964-0.995) | 0.992 | 0.992 | 0.18 / 0.31 | 1.000 | 0.600 | 0.000 | 0.750 | 635.0 s | 196 ms |
+| C PatchCore-inspired full | 0.990 (0.977-0.998) | 0.995 | 0.994 | 0.19 / 0.33 | 1.000 | 0.520 | 0.000 | 0.684 | 686.9 s | 650 ms |
+
+#### chewinggum
+
+| Model | Image AUROC (95% CI) | Image AP | Pixel AUROC | Pixel IoU / Dice | Precision | Recall | FPR | F1 | Fit time | Latency |
+|---|---|---|---|---|---|---|---|---|---|---|
+| A classical | 0.790 (0.706-0.865) | 0.873 | 0.810 | 0.07 / 0.13 | 1.000 | 0.060 | 0.000 | 0.113 | 7.6 s | 14 ms |
+| B Gaussian dev | 0.974 (0.947-0.994) | 0.989 | 0.985 | 0.10 / 0.18 | 1.000 | 0.780 | 0.000 | 0.876 | 17.1 s | 34 ms |
+| B Gaussian full | 0.973 (0.948-0.992) | 0.988 | 0.983 | 0.11 / 0.20 | 1.000 | 0.690 | 0.000 | 0.817 | 44.9 s | 106 ms |
+| C PatchCore-inspired dev | 0.968 (0.940-0.991) | 0.987 | 0.984 | 0.08 / 0.14 | 0.989 | 0.890 | 0.020 | 0.937 | 638.7 s | 199 ms |
+
+#### Macro average over the measured categories
+
+Unweighted means over the categories where each model was measured (three for most models, two for Model C `full`, so the rows are not computed over identical category sets).
+
+| Model | Categories | Image AUROC | Image AP | Pixel AUROC | Pixel IoU | Pixel Dice | F1 |
+|---|---|---|---|---|---|---|---|
+| A classical | 3 (cashew, pipe_fryum, chewinggum) | 0.722 | 0.836 | 0.860 | 0.17 | 0.29 | 0.189 |
+| B Gaussian dev | 3 (cashew, pipe_fryum, chewinggum) | 0.941 | 0.971 | 0.988 | 0.17 | 0.28 | 0.759 |
+| B Gaussian full | 3 (cashew, pipe_fryum, chewinggum) | 0.927 | 0.962 | 0.989 | 0.20 | 0.33 | 0.590 |
+| C PatchCore-inspired dev | 3 (cashew, pipe_fryum, chewinggum) | 0.968 | 0.986 | 0.989 | 0.15 | 0.26 | 0.807 |
+| C PatchCore-inspired full | 2 (cashew, pipe_fryum) | 0.979 | 0.990 | 0.993 | 0.19 | 0.33 | 0.732 |
+
+### What the comparison shows
+
+- **Both deep models beat the classical baseline by a wide margin** in every category and profile: the paired AUROC advantage over the baseline is between +0.17 and +0.32, with intervals that exclude 0.
+- **Model C is not consistently better than Model B.** In `cashew` and `pipe_fryum` it ranks better at the image level, with paired AUROC differences (C minus B, 95% interval) of +0.038 (+0.001 to +0.079) and +0.050 (+0.015 to +0.096) for `dev`, and +0.092 (+0.046 to +0.147) and +0.058 (+0.017 to +0.105) for `full`; all exclude 0 (the `cashew` `dev` bound is barely above 0). In `chewinggum` the `dev` difference is -0.006 (-0.027 to +0.012), which includes 0: the two models rank images equally well there (0.968 against 0.974). So the advantage seen in the first two categories does not generalize to the third.
+- **Thresholds matter as much as ranking.** At the calibrated threshold Model C has higher recall and F1 than Model B on `chewinggum` (recall 0.89 against 0.78) even though the AUROCs are equal. Each threshold comes from only 45 calibration images, so recall differences between models, and between `dev` and `full` of the same model, are partly threshold luck.
+- **Pixel-level overlap is low for every model** (IoU 0.07-0.26): thresholds taken from normal pixels are conservative, and the masks are small. Pixel AUROC is high (about 0.98-0.99 for the deep models) mainly because most pixels are background.
+- **Costs differ by orders of magnitude.** Fit time: about 8 s (classical), 17-52 s (Model B), 11 minutes (Model C). Per-image latency: about 14 ms, 34-130 ms, and 0.2-0.65 s.
+- Only three categories with 50 normal and 100 anomalous test images each are measured, so differences of a few AUROC points should not be over-read, and published VisA results are not compared because their protocols differ.
 
 ## Planned (not implemented yet)
 
@@ -270,7 +345,7 @@ streamlit run app.py
 - [x] Milestone 2 — Evaluation harness and classical baseline
 - [x] Milestone 3 — Feature extractor, Model B, and artifact store
 - [x] Milestone 4 — PatchCore-inspired model
-- [ ] Milestone 5 — Comparison reports and additional categories
+- [x] Milestone 5 — Comparison reports and additional categories (comparison tooling and tables for `cashew`, `pipe_fryum`, and `chewinggum`; `fryum` and Model C `full` on `chewinggum` not run yet)
 - [ ] Milestone 6 — Streamlit application
 - [ ] Milestone 7 — Final verification and delivery
 

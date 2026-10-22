@@ -170,3 +170,57 @@ def test_eval_resizing_gives_the_common_resolution_and_keeps_masks_binary() -> N
         resize_map_for_eval(np.zeros((3, 3, 3)), 64)
     with pytest.raises(EvaluationError):
         resize_mask_for_eval(mask * 2, 64)
+
+
+# ----- paired bootstrap of AUROC differences --------------------------------------------------
+
+
+def test_the_paired_difference_of_identical_models_is_exactly_zero() -> None:
+    from inspectai.evaluation.metrics import paired_bootstrap_auroc_difference
+
+    scores = np.random.default_rng(0).normal(size=40)
+    labels = np.repeat([0, 1], 20)
+    assert paired_bootstrap_auroc_difference(scores, scores, labels, 100) == (0.0, 0.0, 0.0)
+
+
+def test_the_paired_difference_matches_the_two_aurocs_and_brackets_them() -> None:
+    from inspectai.evaluation.metrics import paired_bootstrap_auroc_difference
+
+    rng = np.random.default_rng(1)
+    labels = np.repeat([0, 1], 50)
+    strong = rng.normal(loc=labels * 2.0, size=100)
+    weak = rng.normal(loc=labels * 0.3, size=100)
+    result = paired_bootstrap_auroc_difference(strong, weak, labels, 300, seed=3)
+    assert result is not None
+    difference, low, high = result
+    assert difference == pytest.approx(auroc(strong, labels) - auroc(weak, labels))
+    assert low < difference < high and low > 0  # the strong model is clearly better here
+    reversed_result = paired_bootstrap_auroc_difference(weak, strong, labels, 300, seed=3)
+    assert reversed_result is not None and reversed_result[0] == pytest.approx(-difference)
+    assert reversed_result[2] < 0
+
+
+def test_the_paired_interval_spans_zero_for_two_similar_models() -> None:
+    from inspectai.evaluation.metrics import paired_bootstrap_auroc_difference
+
+    rng = np.random.default_rng(2)
+    labels = np.repeat([0, 1], 25)
+    base = rng.normal(loc=labels * 1.0, size=50)
+    similar = base + rng.normal(scale=0.05, size=50)
+    result = paired_bootstrap_auroc_difference(base, similar, labels, 300)
+    assert result is not None and result[1] <= 0 <= result[2]
+
+
+def test_the_paired_bootstrap_is_reproducible_and_validates_input() -> None:
+    from inspectai.evaluation.metrics import paired_bootstrap_auroc_difference
+
+    rng = np.random.default_rng(4)
+    a, b, labels = rng.normal(size=30), rng.normal(size=30), np.repeat([0, 1], 15)
+    first = paired_bootstrap_auroc_difference(a, b, labels, 100, seed=5)
+    assert first == paired_bootstrap_auroc_difference(a, b, labels, 100, seed=5)
+    assert first != paired_bootstrap_auroc_difference(a, b, labels, 100, seed=6)
+    assert paired_bootstrap_auroc_difference(a, b, np.zeros(30, dtype=int), 100) is None
+    with pytest.raises(EvaluationError):
+        paired_bootstrap_auroc_difference(a, b, labels, 0)
+    with pytest.raises(EvaluationError):
+        paired_bootstrap_auroc_difference(a, b[:10], labels, 10)
