@@ -54,3 +54,42 @@ def test_summary_json_rejects_non_finite_numbers(tmp_path: Path) -> None:
     with pytest.raises(EvaluationError):
         write_summary_json(tmp_path / "s.json", {"metrics": {"x": float("nan")}})
     assert not (tmp_path / "s.json").exists()
+
+
+class _Result:
+    def __init__(self, stdout: str) -> None:
+        self.stdout = stdout
+
+
+def test_power_state_reads_the_active_windows_plan_and_ac_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from inspectai.evaluation import runner
+
+    monkeypatch.setattr(runner.sys, "platform", "win32")
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda *a, **k: _Result("Power Scheme GUID: 381b4222-f694  (High performance)\n"),
+    )
+    monkeypatch.setattr(
+        runner.psutil, "sensors_battery", lambda: SimpleNamespace(power_plugged=True)
+    )
+    assert runner.power_state() == {"power_plan": "High performance", "plugged_in": True}
+
+
+def test_power_state_reports_unknown_instead_of_guessing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from inspectai.evaluation import runner
+
+    def failing(*args: object, **kwargs: object) -> None:
+        raise OSError("powercfg not found")
+
+    monkeypatch.setattr(runner.sys, "platform", "win32")
+    monkeypatch.setattr(runner.subprocess, "run", failing)
+    monkeypatch.setattr(runner.psutil, "sensors_battery", lambda: None)
+    assert runner.power_state() == {"power_plan": "unknown", "plugged_in": None}
+    monkeypatch.setattr(runner.sys, "platform", "linux")
+    assert runner.power_state()["power_plan"] == "unknown"
+    assert "power_plan" in runner.environment_info()

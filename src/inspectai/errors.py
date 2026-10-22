@@ -27,3 +27,11 @@ class ModelError(InspectAIError):
 
 class EvaluationError(InspectAIError):
     """Metrics, thresholds, or reports cannot be computed from the given inputs."""
+
+
+class ArtifactError(InspectAIError):
+    """A model artifact is missing, corrupted, stale, or does not match its manifest."""
+
+
+class WeightsNotFoundError(InspectAIError):
+    """Pretrained weights are not in the local cache and may not be downloaded implicitly."""

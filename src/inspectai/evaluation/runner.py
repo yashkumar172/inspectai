@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import logging
 import platform
+import re
+import subprocess
+import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -99,6 +102,31 @@ def peak_memory_bytes() -> int:
     return int(getattr(info, "peak_wset", info.rss))
 
 
+def power_state() -> dict[str, object]:
+    """Windows power plan and AC/battery state during the run (SPEC.md Section 5.5).
+
+    Values that cannot be determined are reported as "unknown" / None, never guessed.
+    """
+    plan = "unknown"
+    if sys.platform == "win32":
+        try:
+            result = subprocess.run(
+                ["powercfg", "/getactivescheme"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            result = None  # plan stays "unknown"
+        if result is not None:
+            match = re.search(r"\(([^)]+)\)\s*$", result.stdout.strip())
+            if match:
+                plan = match.group(1)
+    battery = psutil.sensors_battery()
+    return {"power_plan": plan, "plugged_in": None if battery is None else battery.power_plugged}
+
+
 def environment_info() -> dict[str, object]:
     """Library versions and hardware, recorded with every experiment (SPEC.md Section 9)."""
     from PIL import Image  # local import keeps the module header light
@@ -111,7 +139,7 @@ def environment_info() -> dict[str, object]:
         "logical_cores": psutil.cpu_count(logical=True),
         "ram_total_gb": round(psutil.virtual_memory().total / 1024**3, 1),
         "opencv_threads": cv2.getNumThreads(),
-        "power_mode": "not recorded",
+        **power_state(),
         "numpy": np.__version__,
         "opencv": cv2.__version__,
         "scikit_learn": sklearn.__version__,
@@ -237,43 +265,125 @@ def save_examples(
         save_rgb_png(out_dir / f"{tag}.png", panel)
 
 
-def run_evaluation(
+@dataclass(frozen=True)
+class FitStats:
+    """Measured cost of fitting (SPEC.md Section 7.4)."""
+
+    n_fit_images: int
+    fit_seconds: float
+    peak_memory_gb: float
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "n_fit_images": self.n_fit_images,
+            "fit_seconds": round(self.fit_seconds, 3),
+            "peak_memory_gb_after_fit": round(self.peak_memory_gb, 2),
+        }
+
+
+@dataclass(frozen=True)
+class Calibration:
+    """Thresholds and score range from the `calibration_normal` split."""
+
+    image_threshold: Threshold
+    pixel_threshold: Threshold
+    scores: dict[str, float]  # n, min, median, max of the calibration image scores
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "image": self.image_threshold.to_dict(),
+            "pixel": self.pixel_threshold.to_dict(),
+            "scores": dict(self.scores),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> Calibration:
+        """Rebuild from `to_dict` output (as stored in an artifact manifest)."""
+        try:
+            image, pixel, scores = data["image"], data["pixel"], data["scores"]
+            return cls(
+                Threshold(image["policy"], float(image["value"]), dict(image["params"])),  # type: ignore[index,call-overload]
+                Threshold(pixel["policy"], float(pixel["value"]), dict(pixel["params"])),  # type: ignore[index,call-overload]
+                {k: float(v) for k, v in scores.items()},  # type: ignore[attr-defined]
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise EvaluationError(f"Invalid calibration record: {exc}") from exc
+
+
+def _split_samples(
+    dataset: VisADataset, splits: SplitResult
+) -> tuple[list[Sample], list[Sample], list[Sample]]:
+    by_rel = {s.image_rel: s for s in dataset.get_samples(splits.object_name)}
+    missing = [
+        n for n in (*splits.fit, *splits.calibration_normal, *splits.test) if n not in by_rel
+    ]
+    if missing:
+        raise EvaluationError(
+            f"{len(missing)} files of the split are not in the split file, for example {missing[0]}"
+        )
+    return (
+        [by_rel[n] for n in splits.fit],
+        [by_rel[n] for n in splits.calibration_normal],
+        [by_rel[n] for n in splits.test],
+    )
+
+
+def fit_model(model: AnomalyModel, dataset: VisADataset, splits: SplitResult) -> FitStats:
+    """Fit on the `fit` split only and measure time and peak memory."""
+    fit_samples, _, _ = _split_samples(dataset, splits)
+    logger.info("Fitting on %d images of %s", len(fit_samples), splits.object_name)
+    start = time.perf_counter()
+    model.fit(dataset.load_image(s) for s in fit_samples)
+    seconds = time.perf_counter() - start
+    return FitStats(len(fit_samples), seconds, peak_memory_bytes() / 1024**3)
+
+
+def calibrate(
+    model: AnomalyModel, dataset: VisADataset, splits: SplitResult, options: EvalOptions
+) -> Calibration:
+    """Score `calibration_normal` and derive the image and pixel thresholds (normal_percentile)."""
+    _, calibration_samples, _ = _split_samples(dataset, splits)
+    scored = _score_samples(
+        model, dataset, calibration_samples, options.eval_resolution, keep_masks=False
+    )
+    scores = np.array([s.score for s in scored])
+    pixel_values = np.concatenate([s.eval_map.ravel() for s in scored])
+    return Calibration(
+        image_threshold=normal_percentile_threshold(scores, options.quantile),
+        pixel_threshold=normal_percentile_threshold(pixel_values, options.quantile),
+        scores={
+            "n": int(scores.size),
+            "min": float(scores.min()),
+            "median": float(np.median(scores)),
+            "max": float(scores.max()),
+        },
+    )
+
+
+def evaluate_fitted(
     model: AnomalyModel,
     model_name: str,
     model_config: dict[str, object],
     dataset: VisADataset,
     splits: SplitResult,
-    options: EvalOptions | None = None,
+    options: EvalOptions,
+    calibration: Calibration,
+    fit_stats: Mapping[str, object] | None = None,
 ) -> EvaluationResult:
-    """Fit `model` on the fit split, choose thresholds, and evaluate on the test split."""
-    options = options or EvalOptions()
+    """Score the test split with an already fitted model and compute all metrics.
+
+    `calibration` comes from `calibrate` (or from a saved artifact). Under `normal_percentile`
+    its image threshold is used as is. Under `labeled_calibration` the image threshold is
+    chosen on `test_calibration` and metrics are reported on `test_eval` only.
+    """
     category = splits.object_name
-    by_rel = {s.image_rel: s for s in dataset.get_samples(category)}
-    fit_samples = [by_rel[name] for name in splits.fit]
-    calibration_samples = [by_rel[name] for name in splits.calibration_normal]
-    test_samples = [by_rel[name] for name in splits.test]
+    _, _, test_samples = _split_samples(dataset, splits)
     resolution = options.eval_resolution
 
-    # Fit on the fit split only.
-    logger.info("Fitting %s on %d images of %s", model_name, len(fit_samples), category)
-    start = time.perf_counter()
-    model.fit(dataset.load_image(s) for s in fit_samples)
-    fit_seconds = time.perf_counter() - start
-    peak_after_fit = peak_memory_bytes()
-
-    # Thresholds from calibration data.
-    calibration = _score_samples(model, dataset, calibration_samples, resolution, keep_masks=False)
-    calibration_scores = np.array([s.score for s in calibration])
-    pixel_values = np.concatenate([s.eval_map.ravel() for s in calibration])
-    pixel_threshold = normal_percentile_threshold(pixel_values, options.quantile)
-    image_threshold: Threshold
-    if options.threshold_policy == NORMAL_PERCENTILE:
-        image_threshold = normal_percentile_threshold(calibration_scores, options.quantile)
-
-    # Score the test split.
     test = _score_samples(model, dataset, test_samples, resolution, keep_masks=True)
     test_split_name = "test"
     evaluated = test
+    image_threshold = calibration.image_threshold
     threshold_extra: dict[str, object] = {}
     if options.threshold_policy == LABELED_CALIBRATION:
         names = [s.sample.image_rel for s in test]
@@ -298,7 +408,7 @@ def run_evaluation(
         "evaluation_split": test_split_name,
         "evaluation_resolution": resolution,
         "image": _image_metrics(scores, labels, image_threshold.value, options),
-        "pixel": _pixel_metrics(evaluated, pixel_threshold.value),
+        "pixel": _pixel_metrics(evaluated, calibration.pixel_threshold.value),
     }
 
     predicted = classify(scores, image_threshold.value)
@@ -318,6 +428,18 @@ def run_evaluation(
     ]
 
     seconds = np.array([s.seconds for s in test])
+    performance: dict[str, object] = dict(fit_stats or {})
+    performance.update(
+        {
+            "n_timed_images": int(seconds.size),
+            "latency_seconds_mean": round(float(seconds.mean()), 4),
+            "latency_seconds_median": round(float(np.median(seconds)), 4),
+            "latency_seconds_max": round(float(seconds.max()), 4),
+            "images_per_second": round(float(1.0 / seconds.mean()), 2),
+            "latency_note": "model.predict only; image decoding and metrics are excluded",
+            "peak_memory_gb_after_scoring": round(peak_after_scoring / 1024**3, 2),
+        }
+    )
     summary: dict[str, object] = {
         "model": model_name,
         "category": category,
@@ -336,27 +458,29 @@ def run_evaluation(
         },
         "threshold": {
             "image": image_threshold.to_dict(),
-            "pixel": pixel_threshold.to_dict(),
+            "pixel": calibration.pixel_threshold.to_dict(),
             **threshold_extra,
         },
-        "calibration_scores": {
-            "min": float(calibration_scores.min()),
-            "median": float(np.median(calibration_scores)),
-            "max": float(calibration_scores.max()),
-        },
+        "calibration_scores": {k: v for k, v in calibration.scores.items() if k != "n"},
         "metrics": metrics,
-        "performance": {
-            "n_fit_images": len(fit_samples),
-            "fit_seconds": round(fit_seconds, 3),
-            "n_timed_images": int(seconds.size),
-            "latency_seconds_mean": round(float(seconds.mean()), 4),
-            "latency_seconds_median": round(float(np.median(seconds)), 4),
-            "latency_seconds_max": round(float(seconds.max()), 4),
-            "images_per_second": round(float(1.0 / seconds.mean()), 2),
-            "latency_note": "model.predict only; image decoding and metrics are excluded",
-            "peak_memory_gb_after_fit": round(peak_after_fit / 1024**3, 2),
-            "peak_memory_gb_after_scoring": round(peak_after_scoring / 1024**3, 2),
-        },
+        "performance": performance,
         "environment": environment_info(),
     }
     return EvaluationResult(rows, summary, _pick_examples(evaluated))
+
+
+def run_evaluation(
+    model: AnomalyModel,
+    model_name: str,
+    model_config: dict[str, object],
+    dataset: VisADataset,
+    splits: SplitResult,
+    options: EvalOptions | None = None,
+) -> EvaluationResult:
+    """Fit `model` on the fit split, choose thresholds, and evaluate on the test split."""
+    options = options or EvalOptions()
+    stats = fit_model(model, dataset, splits)
+    calibration = calibrate(model, dataset, splits, options)
+    return evaluate_fitted(
+        model, model_name, model_config, dataset, splits, options, calibration, stats.to_dict()
+    )

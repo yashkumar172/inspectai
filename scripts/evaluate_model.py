@@ -2,13 +2,18 @@
 
 Usage (PowerShell):
     python scripts/evaluate_model.py --model classical --category cashew
-    python scripts/evaluate_model.py --model classical --category cashew --threshold-policy labeled_calibration
+    python scripts/evaluate_model.py --model gaussian --category cashew --profile dev
+    python scripts/evaluate_model.py --model gaussian --category cashew --threshold-policy labeled_calibration
 
-Until the artifact store exists (Milestone 3), the classical model is fitted inside this command
-from the `fit` split only; test images are used only for scoring. Output goes to
-<INSPECTAI_REPORT_DIR>/<model>/<category>/: predictions.csv, summary.json, and examples/*.png.
+`gaussian` loads the artifact written by scripts/fit_model.py (after integrity checks) and never
+refits; its split and thresholds come from the artifact, and an artifact fitted with other
+settings than requested here is rejected as stale. `classical` has no artifact yet and is
+fitted inside this command from the `fit` split only. Test images are used only for scoring.
+Output goes to <INSPECTAI_REPORT_DIR>/<model>/<category>/: predictions.csv, summary.json, and
+examples/*.png.
 
-Exit codes: 0 success; 2 configuration or data error; 1 any other failure.
+Exit codes: 0 success; 2 configuration or data error; 3 artifact error;
+4 pretrained weights unavailable; 1 any other failure.
 """
 
 from __future__ import annotations
@@ -17,13 +22,16 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
-from inspectai.config import SplitConfig, load_paths, resize_mode_for
+from inspectai.artifacts.gaussian_io import load_gaussian
+from inspectai.artifacts.store import artifact_dir
+from inspectai.config import PROFILES, SplitConfig, load_paths, resize_mode_for
 from inspectai.data.dataset import SUPPORTED_OBJECTS, VisADataset
 from inspectai.data.splits import make_splits
 from inspectai.errors import (
+    ArtifactError,
     ConfigError,
     DatasetError,
     EvaluationError,
@@ -31,18 +39,29 @@ from inspectai.errors import (
     InspectAIError,
     ModelError,
     SplitError,
+    WeightsNotFoundError,
 )
 from inspectai.evaluation.report import write_predictions_csv, write_summary_json
-from inspectai.evaluation.runner import EvalOptions, run_evaluation, save_examples
+from inspectai.evaluation.runner import (
+    Calibration,
+    EvalOptions,
+    EvaluationResult,
+    evaluate_fitted,
+    run_evaluation,
+    save_examples,
+)
 from inspectai.evaluation.thresholds import DEFAULT_QUANTILE, POLICIES
 from inspectai.models.base import AnomalyModel
 from inspectai.models.classical import ClassicalConfig, ClassicalModel
+from inspectai.models.gaussian import gaussian_config_for
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
 EXIT_DATA_ERROR = 2
+EXIT_ARTIFACT_ERROR = 3
+EXIT_WEIGHTS_UNAVAILABLE = 4
 
-MODELS = ("classical",)
+MODELS = ("classical", "gaussian")
 logger = logging.getLogger("evaluate_model")
 
 
@@ -50,28 +69,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Evaluate a model on one VisA category.")
     parser.add_argument("--model", choices=MODELS, required=True)
     parser.add_argument("--category", choices=SUPPORTED_OBJECTS, required=True)
+    parser.add_argument("--profile", choices=tuple(PROFILES), default="dev", help="gaussian only.")
+    parser.add_argument(
+        "--feature-dim", type=int, default=100, help="gaussian only; must match the fit."
+    )
     parser.add_argument("--threshold-policy", choices=POLICIES, default=POLICIES[0])
     parser.add_argument("--quantile", type=float, default=DEFAULT_QUANTILE)
     parser.add_argument("--seed", type=int, default=SplitConfig().seed, help="Split seed.")
+    parser.add_argument("--artifact-dir", type=Path, help="gaussian only.")
     parser.add_argument(
-        "--output-dir",
-        type=Path,
-        help="Default: <INSPECTAI_REPORT_DIR>/<model>/<category>.",
+        "--output-dir", type=Path, help="Default: <INSPECTAI_REPORT_DIR>/<model>/<category>."
     )
     return parser
-
-
-def build_model(name: str, category: str) -> tuple[AnomalyModel, dict[str, object]]:
-    if name == "classical":
-        config = ClassicalConfig(resize_mode=resize_mode_for(category))
-        return ClassicalModel(config), asdict(config)
-    raise ConfigError(f"Unknown model {name!r}")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return _run(args)
+    except WeightsNotFoundError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return EXIT_WEIGHTS_UNAVAILABLE
+    except ArtifactError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return EXIT_ARTIFACT_ERROR
     except (ConfigError, DatasetError, SplitError, ImageError, EvaluationError, ModelError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return EXIT_DATA_ERROR
@@ -80,15 +101,44 @@ def main(argv: Sequence[str] | None = None) -> int:
         return EXIT_FAILURE
 
 
-def _run(args: argparse.Namespace) -> int:
-    paths = load_paths()
-    dataset = VisADataset.from_paths(paths)
-    splits = make_splits(dataset.samples, args.category, SplitConfig(seed=args.seed))
-    model, model_config = build_model(args.model, args.category)
+def _evaluate(
+    args: argparse.Namespace, dataset: VisADataset, paths_artifact_dir: Path
+) -> tuple[AnomalyModel, EvaluationResult]:
     options = EvalOptions(
         threshold_policy=args.threshold_policy, quantile=args.quantile, split_seed=args.seed
     )
-    result = run_evaluation(model, args.model, model_config, dataset, splits, options)
+    if args.model == "classical":
+        splits = make_splits(dataset.samples, args.category, SplitConfig(seed=args.seed))
+        config = ClassicalConfig(resize_mode=resize_mode_for(args.category))
+        model = ClassicalModel(config)
+        return model, run_evaluation(model, "classical", asdict(config), dataset, splits, options)
+
+    requested = gaussian_config_for(args.category, args.profile, args.feature_dim, args.seed)
+    directory = args.artifact_dir or artifact_dir(paths_artifact_dir, "gaussian", args.category)
+    model, artifact = load_gaussian(directory, args.category, requested)
+    calibration = Calibration.from_dict(artifact.manifest["calibration"])  # type: ignore[arg-type]
+    stored_resolution = artifact.manifest.get("eval_resolution")
+    if not isinstance(stored_resolution, int):
+        raise ArtifactError("Manifest has no eval_resolution")
+    options = replace(options, eval_resolution=stored_resolution)  # must match the calibration
+    fit_stats = artifact.manifest.get("fit_stats")
+    result = evaluate_fitted(
+        model,
+        "gaussian",
+        requested.to_dict(),
+        dataset,
+        artifact.split,
+        options,
+        calibration,
+        fit_stats if isinstance(fit_stats, dict) else None,
+    )
+    return model, result
+
+
+def _run(args: argparse.Namespace) -> int:
+    paths = load_paths()
+    dataset = VisADataset.from_paths(paths)
+    model, result = _evaluate(args, dataset, paths.artifact_dir)
 
     out_dir = args.output_dir or paths.report_dir / args.model / args.category
     write_predictions_csv(out_dir / "predictions.csv", result.rows)

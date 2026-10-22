@@ -59,6 +59,20 @@ def resize_mode_for(object_name: str, overrides: Mapping[str, str] | None = None
     return mode
 
 
+# Backbone profiles (SPEC.md Section 5.5).
+PROFILES: dict[str, dict[str, object]] = {
+    "dev": {"backbone": "resnet18", "layers": ("layer2", "layer3"), "image_size": 224},
+    "full": {"backbone": "wide_resnet50_2", "layers": ("layer2", "layer3"), "image_size": 224},
+}
+
+
+def profile_settings(name: str) -> dict[str, object]:
+    """The backbone, feature layers, and image size of a profile (`dev` or `full`)."""
+    if name not in PROFILES:
+        raise ConfigError(f"Unknown profile {name!r}; expected one of {tuple(PROFILES)}")
+    return dict(PROFILES[name])
+
+
 @dataclass(frozen=True)
 class Paths:
     """Machine-specific locations, supplied through environment variables."""

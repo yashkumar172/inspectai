@@ -9,6 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent / "fixtures"))
 
+from fake_backbone import FakeBackbone
 from make_synthetic import SyntheticVisA, build_synthetic_visa
 
 
@@ -16,3 +17,8 @@ from make_synthetic import SyntheticVisA, build_synthetic_visa
 def synthetic_visa(tmp_path: Path) -> SyntheticVisA:
     """A small VisA-style tree under a folder name with a space in it."""
     return build_synthetic_visa(tmp_path / "data root")
+
+
+@pytest.fixture
+def fake_backbone() -> FakeBackbone:
+    return FakeBackbone()
