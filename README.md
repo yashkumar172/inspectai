@@ -1,18 +1,79 @@
 # InspectAI — Industrial Visual Anomaly Detection
 
-CPU-friendly visual anomaly detection on the VisA dataset: a classical baseline, a Gaussian feature model, and a PatchCore-inspired model, with a Streamlit app. The full specification is in [SPEC.md](SPEC.md).
+InspectAI finds defective products in photographs, shows where the defect is, and reports how far an image is from normal. It learns **only from normal images** of each product and is evaluated on the VisA benchmark (Amazon, ECCV 2022). Three methods are implemented and compared on identical splits: a classical OpenCV baseline, a Gaussian feature model on frozen pretrained CNN features (PaDiM-inspired), and a PatchCore-inspired nearest-neighbor model. Everything runs on an ordinary Windows CPU, and a Streamlit app serves the saved models. The full specification is in [SPEC.md](SPEC.md).
 
-**Status: Milestone 6 (Streamlit app) implemented; Milestones 0-6 are done.** The package contains the dataset loader, splits, preprocessing, the metrics and threshold harness, the classical OpenCV baseline (Model A), a pretrained-CNN feature extractor, the Gaussian feature model (Model B), the PatchCore-inspired model (Model C), and a checked artifact store. The Streamlit app (`app.py`) runs the saved models, shows the evaluation results, and is tested.
+**Status: all milestones (0-7) are done; read [Limitations](#limitations) before relying on any result.** The project is a research and educational prototype, not a certified quality-control system. Deployment (optional) was not attempted, and the app's on-screen layout was not visually verified in a browser.
 
-## Requirements
+## Key features
 
-- Windows with PowerShell, Python 3.12
-- No GPU needed (CPU-only PyTorch)
-- Reference machine: Ryzen 5 5500U (6 cores / 12 threads), 16 GB RAM (see [docs/environment.md](docs/environment.md))
+- **Dataset tooling:** a split-file parser and validator for all 12 VisA objects, safe image and mask loading, and reproducible `fit` / `calibration_normal` / `test` splits with no test-set leakage.
+- **Three models, one harness:** classical baseline, Gaussian (Mahalanobis) model, and a PatchCore-inspired model with a memory-bank limit, a time limit, and a recorded `max_fit_images` cap.
+- **Honest evaluation:** image AUROC and AP with bootstrap confidence intervals and sample counts, pixel metrics, per-category thresholds chosen without test data, paired AUROC differences, and a comparison tool that refuses to compare runs that were not evaluated identically.
+- **Checked artifacts:** fitted models are saved as safetensors with checksums, shapes, and a stored split and threshold; they are never pickled and are verified on every load.
+- **Streamlit app:** upload or pick an image, see the decision, the score next to its threshold and the normal-score range, the heatmap and overlay, and an evaluation dashboard that validates its data before showing it.
+- **Reproducible and tested:** fixed seeds, bit-for-bit reproducible fits, a synthetic end-to-end demo that needs no dataset or weights, and an automated test suite.
+
+## Architecture
+
+```text
+ VisA images + masks + split file (outside the repository)
+          |
+          v
+ data/        parse and validate -> fit | calibration_normal | test  (seeded, disjoint, split.json)
+          |
+          v
+ preprocessing/   resize (letterbox or stretch) -> ImageNet normalization
+          |
+          +--> models/classical   (Model A)  per-pixel mean / std z-score
+          |
+          +--> models/features    frozen ResNet-18 / Wide ResNet-50-2, layer2 + layer3
+                   |
+                   +--> models/gaussian   (Model B)  per-position Gaussian, Mahalanobis distance
+                   +--> models/patchcore  (Model C)  coreset memory bank, nearest-neighbor distance
+          |
+          v   anomaly map (input size) + image score (max of the map)
+ evaluation/  thresholds from calibration_normal -> score test -> metrics -> predictions.csv, summary.json
+          |                                  |
+          |                                  v
+          |                       artifacts/   manifest + tensors + split + config (checked on load)
+          v
+ evaluation/comparison  verify + compare -> comparison.json / .csv / .md, figures
+          |
+          v
+ inference/ + ui/   load artifacts -> inspect an image -> Streamlit pages (Home, Inspect, Dashboard, About)
+```
+
+How each part works is explained in [docs/architecture.md](docs/architecture.md).
+
+## Technologies
+
+Python 3.12 · PyTorch 2.14 (CPU) and torchvision 0.29 (ImageNet-1k ResNet-18 and Wide ResNet-50-2 weights) · NumPy · OpenCV (headless) · Pillow · scikit-learn (metrics only) · safetensors · PyYAML · psutil · Streamlit 1.66 · pytest · Ruff. The exact versions are pinned in `requirements-lock.txt`. No GPU, paid service, or network call is needed at run time; the only downloads are the explicit weight fetch and the dataset you choose to download.
+
+## Hardware and runtime
+
+| Item | Value |
+|---|---|
+| Machine used for every measurement | AMD Ryzen 5 5500U (6 cores / 12 threads), 16 GB RAM, no GPU, Windows 11, plugged in, **Balanced** power plan |
+| Python / PyTorch | 3.12.2 / 2.14.1+cpu |
+| Fit time (405 images) | classical about 8 s · Model B 15-52 s · Model C about 11 minutes |
+| Prediction latency per image | classical about 14 ms · Model B 34-130 ms · Model C 0.2-0.65 s |
+| Peak memory while fitting | 0.4 GB (classical) · 0.74-1.04 GB (Model B) · 1.2 GB (Model C `dev`) · 2.9 GB (Model C `full`) |
+| Synthetic end-to-end demo | about 13 s |
+| Default test suite | about 2 minutes |
+
+The measurements are detailed in the model sections below and in [docs/environment.md](docs/environment.md).
+
+## Documentation
+
+- [docs/architecture.md](docs/architecture.md): data flow, feature extraction, splits and thresholds, how each model scores, persistence, and the UI integration.
+- [docs/evaluation.md](docs/evaluation.md): metrics, threshold selection, comparison method, deviations from the published algorithms, and how to reproduce every number.
+- [docs/limitations.md](docs/limitations.md): what the results do not show, what is unfinished, and future work.
+- [docs/final_report.md](docs/final_report.md): the final project report with the Definition-of-Done check.
+- [docs/environment.md](docs/environment.md): hardware, versions, and locations.
 
 ## Installation (Windows PowerShell)
 
-Keep the repository, virtual environment, dataset, and artifacts **outside OneDrive** (SPEC.md Section 9.2).
+Keep the repository, virtual environment, dataset, and artifacts **outside OneDrive** (SPEC.md Section 9.2); a OneDrive-synced folder can lock or re-upload large files. If you must use a synced folder, pause syncing for these directories.
 
 ```powershell
 # 1. Virtual environment (outside OneDrive)
@@ -31,7 +92,7 @@ pip install -e ".[dev]"
 
 ### Environment variables
 
-Machine-specific locations come from environment variables and are never committed. Set them once for your user account, then open a new terminal:
+Machine-specific locations come from environment variables and are never committed (`configs/default.yaml` refers to them as `${INSPECTAI_DATA_ROOT}` and so on). Set them once for your user account, then open a new terminal:
 
 ```powershell
 [Environment]::SetEnvironmentVariable('INSPECTAI_DATA_ROOT',    'C:\dev\inspectai-data',           'User')
@@ -40,25 +101,81 @@ Machine-specific locations come from environment variables and are never committ
 [Environment]::SetEnvironmentVariable('TORCH_HOME',             'C:\dev\inspectai-data\torch_cache', 'User')
 ```
 
-## Dataset
+### Configuration
 
-The dataset (VisA) is not part of this repository. It lives under `INSPECTAI_DATA_ROOT`:
+`configs/default.yaml` is the readable reference of every default (splits, thresholds, evaluation, model settings, limits, upload rules). `inspectai.settings.load_default_config` validates it by building the real settings objects (an invalid value raises a clear `ConfigError`), and a test fails if any value in the file differs from the default in the code. Command-line flags override the defaults. Only CPU execution is supported: `device: cpu` is the only accepted value, and nothing is ever moved to a GPU.
+
+## Dataset download and setup
+
+The VisA dataset is **not** part of this repository and no script downloads it; downloading is something you do yourself, from the official links only. It is released under CC BY 4.0 (see [attribution](#dataset-attribution-and-licensing)). The official source is <https://github.com/amazon-science/spot-diff>.
+
+1. **Disk space.** You need the archive size plus a margin (about 1.93 GB + 1 GB) and about 1.92 GB for the extracted images.
+2. **Download the archive** from the link in the official README (do not use mirrors) into a staging folder outside the repository and OneDrive:
+
+   ```powershell
+   New-Item -ItemType Directory -Force C:\dev\inspectai-data\downloads | Out-Null
+   curl.exe -L -o C:\dev\inspectai-data\downloads\VisA_20220922.tar https://amazon-visual-anomaly.s3.us-west-2.amazonaws.com/VisA_20220922.tar
+   ```
+
+3. **Verify it.** The archive was 1,929,840,640 bytes with SHA-256 `2EB8690C803AB37DE0324772964100169EC8BA1FA3F7E94291C9CA673F40F362` when this project was built (the official README documents no checksum):
+
+   ```powershell
+   (Get-Item C:\dev\inspectai-data\downloads\VisA_20220922.tar).Length
+   Get-FileHash -Algorithm SHA256 C:\dev\inspectai-data\downloads\VisA_20220922.tar
+   tar -tf C:\dev\inspectai-data\downloads\VisA_20220922.tar | Select-String -Pattern '^/|\.\.' | Select-Object -First 3   # must print nothing
+   ```
+
+4. **Extract** so that the object folders end up under `visa\VisA\` (the archive has no top-level `VisA` folder; it also contains `split_csv\` and `LICENSE-DATASET`):
+
+   ```powershell
+   New-Item -ItemType Directory -Force C:\dev\inspectai-data\visa\VisA | Out-Null
+   tar -xf C:\dev\inspectai-data\downloads\VisA_20220922.tar -C C:\dev\inspectai-data\visa\VisA
+   ```
+
+5. **Place the split file** where the loader expects it. The archive's own copy is identical to the official one (SHA-256 `A48557E6033318CB90556F706196BC9D247A776A23EA51AECEE5A80DD0332995`, repository commit `2a692ab575001cbde74d402d897a7286086c6199`):
+
+   ```powershell
+   New-Item -ItemType Directory -Force C:\dev\inspectai-data\visa\split_csv | Out-Null
+   Copy-Item C:\dev\inspectai-data\visa\VisA\split_csv\1cls.csv C:\dev\inspectai-data\visa\split_csv\1cls.csv
+   ```
+
+6. **Validate** (expect 10,821 rows and 0 errors), then delete the archive:
+
+   ```powershell
+   python scripts/validate_dataset.py
+   Remove-Item C:\dev\inspectai-data\downloads\VisA_20220922.tar
+   ```
+
+The loader reads `1cls.csv` directly and never copies images, so the official `prepare_data.py` is not needed. The resulting layout is:
 
 ```text
 C:\dev\inspectai-data\visa\
 ├── split_csv\1cls.csv
-└── VisA\<object>\Data\...
+└── VisA\<object>\Data\Images\{Normal,Anomaly}\... and Data\Masks\Anomaly\...
 ```
 
-Download and verification steps, the licence (CC BY 4.0), and the citation are in SPEC.md Section 3.1. Downloads happen only when you ask for them; no script in this project downloads the dataset.
+### Pretrained weights
+
+The deep models use torchvision's ImageNet weights, which are fetched only on request and cached under `TORCH_HOME`:
+
+```powershell
+python scripts/fetch_weights.py --backbone resnet18          # 45 MB, the `dev` profile
+python scripts/fetch_weights.py --backbone wide_resnet50_2   # 132 MB, the `full` profile
+```
+
+Without cached weights, the scripts and the app stop with an explanation (exit code 4) and never use random weights.
 
 ## Verify the setup
 
 ```powershell
 python -c "import inspectai; print(inspectai.__version__)"
-pytest
-ruff check .
+pytest                                    # about 2 minutes; needs neither the dataset nor weights
+ruff check . ; ruff format --check .
+python scripts/run_demo.py                # about 13 seconds, synthetic data, end to end
+pytest -m "needs_dataset or slow"         # optional: uses the real dataset and cached weights
 ```
+
+`scripts/run_demo.py` generates a small synthetic VisA-style dataset, fits all three models with a deterministic fake backbone, reloads the saved artifacts, predicts every test image the way the app does, checks each score and decision against the saved evaluation report, and writes a comparison report, a visualization, and prediction details. Its metrics come from random synthetic images and mean nothing; it proves that the pipeline works end to end.
 
 ## Validate the dataset
 
@@ -381,6 +498,31 @@ Using the VisA test images in the app requires the attribution already stated in
 
 How it was verified: 30 tests drive the real pages with Streamlit's `AppTest` against synthetic artifacts (predictions equal the saved reports, every failure path, upload rejection with the model never invoked, path and stack-trace leak checks, dashboard validation), and 65 more cover upload validation (31), the predictor (22), and the dashboard data (12). In addition, with the real artifacts and pretrained weights, 20 inspections through the Inspect page (5 model configurations x 2 categories x one anomalous and one normal test image) reproduced the saved evaluation scores, thresholds, and decisions, and `streamlit run app.py` started and passed Streamlit's health check. A visual check in a browser was not possible in the development environment (the browser extension was unavailable), so the layout has not been reviewed on screen.
 
+## Example outputs
+
+Each row is one test image; the columns are the original image, the ground-truth defect mask (black for normal images), and the anomaly heatmap overlaid on the image for each model, with the score, the model's threshold, and the decision under it. The images were chosen without looking at any model output: two normal images at random and the small, median, and large defect by mask area. They include false alarms and misses; nothing was filtered.
+
+![Example predictions on cashew](docs/images/example_cashew.jpg)
+
+![Example predictions on pipe_fryum](docs/images/example_pipe_fryum.jpg)
+
+*Dataset images: VisA (Zou et al., ECCV 2022), licensed CC BY 4.0, https://github.com/amazon-science/spot-diff. These figures are modified material: images were resized and heatmap overlays and text were added. Full-size figures for all four categories are generated by `scripts/compare_models.py`.*
+
+## Limitations
+
+The full list is in [docs/limitations.md](docs/limitations.md). The most important points:
+
+- Four of the twelve VisA objects were evaluated, with 50 normal and 100 anomalous test images each; one seed and one machine. Read the confidence intervals.
+- Model C is not consistently better than Model B, and the `full` profile is not always better than `dev`; the ranking depends on the category.
+- Thresholds come from about 45 held-out normal images, so they are conservative: few false alarms, but moderate recall (0.06 to 0.90 by model and category). Compare models by AUROC and paired intervals, not by F1.
+- Defect localisation is coarse (pixel IoU 0.05 to 0.30), and small or faint defects are often missed.
+- An anomaly score is not a probability, and scores are only meaningful if the object matches the selected category.
+- Not done: deployment (optional, local-only mode is the final state), a visual browser check of the app, the other eight VisA objects, a hosted float16 profile, and benchmarking on the High-performance power plan.
+
+## Deployment status
+
+Deployment (SPEC.md Section 15) is optional and was **not attempted**: the project has no remote repository and nothing was hosted or tested online, so no hosted deployment is claimed. The supported mode is local: `streamlit run app.py` on the machine that holds the artifacts. A hosted deployment would need the lightweight profile (`dev`, a 5% coreset, float16 tensors), which is not implemented, and the model artifacts supplied separately, since neither the dataset nor the weights are in the repository.
+
 ## Milestone checklist
 
 - [x] Milestone 0 — Repository inspection and setup
@@ -390,7 +532,7 @@ How it was verified: 30 tests drive the real pages with Streamlit's `AppTest` ag
 - [x] Milestone 4 — PatchCore-inspired model
 - [x] Milestone 5 — Comparison reports and additional categories (comparison tooling; all four initial categories measured with all five configurations)
 - [x] Milestone 6 — Streamlit application (tested with `AppTest` and real artifacts; the on-screen layout was not visually verified in a browser)
-- [ ] Milestone 7 — Final verification and delivery
+- [x] Milestone 7 — Final verification and delivery (see docs/final_report.md; limitations are disclosed above)
 
 ## Troubleshooting
 

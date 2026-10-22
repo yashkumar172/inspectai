@@ -1,0 +1,97 @@
+# InspectAI default settings (SPEC.md Sections 9 and 9.2).
+#
+# This file is the readable reference of every default the code uses. It is not a second source
+# of truth: `inspectai.settings.load_default_config` validates it by building the real settings
+# objects from it, and a test fails if any value here differs from the default in the code.
+# Command-line flags override the defaults; machine-specific locations come from environment
+# variables and are never written into this file (SPEC.md Section 9.2).
+
+paths:
+  data_root: ${INSPECTAI_DATA_ROOT}        # holds visa/VisA/<object>/... and visa/split_csv/1cls.csv
+  artifact_dir: ${INSPECTAI_ARTIFACT_DIR}  # fitted models: <artifact_dir>/<model>/<category>/
+  report_dir: ${INSPECTAI_REPORT_DIR}      # evaluation outputs and comparison reports
+  torch_home: ${TORCH_HOME}                # torchvision weights cache; weights are never silently downloaded
+
+device: cpu   # CPU only; any other value is rejected (GPU execution is a non-goal)
+seed: 42
+
+# The initial categories of SPEC.md Section 3.2 (all 12 VisA objects are supported by the loader).
+categories: [cashew, pipe_fryum, chewinggum, fryum]
+
+splits:                      # SPEC.md Section 3.5
+  seed: 42
+  calibration_fraction: 0.1  # share of the official train rows held out as calibration_normal
+  min_calibration: 10
+
+preprocessing:               # SPEC.md Section 6
+  image_size: 224
+  resize_mode: stretch       # generic default; categories use the table below
+  aspect_tolerance: 0.25     # uploads deviating more than this from the category's ratio are rejected
+  max_pixels: 16777216       # 4096 x 4096 in total
+  max_side: 4096             # and at most this many pixels per side
+
+# Resize mode per category, chosen from the measured median aspect ratios (SPEC.md Section 6).
+resize_modes:
+  candle: letterbox
+  capsules: letterbox
+  cashew: letterbox
+  chewinggum: letterbox
+  fryum: letterbox
+  macaroni1: letterbox
+  macaroni2: letterbox
+  pcb1: letterbox
+  pcb2: letterbox
+  pcb3: letterbox
+  pcb4: letterbox
+  pipe_fryum: letterbox
+
+profiles:                    # SPEC.md Section 5.5
+  dev:
+    backbone: resnet18
+    layers: [layer2, layer3]
+    image_size: 224
+  full:
+    backbone: wide_resnet50_2
+    layers: [layer2, layer3]
+    image_size: 224
+
+thresholds:                  # SPEC.md Section 3.5 (policy normal_percentile uses calibration_normal only)
+  policy: normal_percentile
+  quantile: 0.99
+
+evaluation:                  # SPEC.md Sections 7.1 and 7.2
+  eval_resolution: 256       # common resolution for pixel metrics
+  bootstrap_resamples: 1000
+  bootstrap_seed: 42
+
+classical:                   # Model A
+  image_size: 256
+  resize_mode: letterbox
+  smoothing_sigma: 4.0
+  std_floor: 5.0
+
+gaussian:                    # Model B (backbone, layers, image size and resize mode come from the profile)
+  d: 100
+  epsilon: 0.01
+  smoothing_sigma: 4.0
+  seed: 42
+  batch_size: 8
+  num_threads: 6
+
+patchcore:                   # Model C
+  coreset_ratio: 0.1
+  projection_dim: 128
+  neighborhood: 3
+  smoothing_sigma: 4.0
+  seed: 42
+  chunk_size: 16384
+  batch_size: 8
+  num_threads: 6
+  max_bank_gb: 4.0
+  max_fit_minutes: 30.0
+  max_fit_images: null       # null = fit on the whole fit split; a number = recorded seeded subset
+
+app:                         # Streamlit app (SPEC.md Section 8)
+  max_upload_mb: 10
+  min_side: 32
+  aspect_tolerance: 0.25

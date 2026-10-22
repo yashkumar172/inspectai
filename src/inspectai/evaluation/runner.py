@@ -77,6 +77,18 @@ class EvalOptions:
             raise EvaluationError(
                 f"Unknown threshold policy {self.threshold_policy!r}; expected one of {POLICIES}"
             )
+        if isinstance(self.quantile, bool) or not 0.0 < float(self.quantile) <= 1.0:
+            raise EvaluationError(f"quantile must be in (0, 1], got {self.quantile!r}")
+        for name in ("eval_resolution", "bootstrap_resamples"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise EvaluationError(f"{name} must be a positive integer, got {value!r}")
+        if self.eval_resolution < 8:
+            raise EvaluationError(f"eval_resolution must be at least 8, got {self.eval_resolution}")
+        for name in ("split_seed", "bootstrap_seed"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise EvaluationError(f"{name} must be an integer, got {value!r}")
 
 
 @dataclass

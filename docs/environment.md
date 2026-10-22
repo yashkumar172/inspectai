@@ -1,6 +1,6 @@
 # Environment record
 
-Recorded for Milestone 0 on 2026-10-22. Update this file when the environment changes.
+Recorded for Milestone 0 on 2026-10-22 and re-checked for Milestone 7 on 2026-10-23 (`pip check` reports no broken requirements, and `requirements-lock.txt` matches the installed packages exactly). Update this file when the environment changes.
 
 ## Hardware and operating system
 
@@ -32,6 +32,17 @@ Recorded for Milestone 0 on 2026-10-22. Update this file when the environment ch
 | ruff | 0.17.1 |
 
 The full pinned list is in `requirements-lock.txt`. PyTorch was installed from the CPU wheel index (`https://download.pytorch.org/whl/cpu`); `torch.cuda.is_available()` returns `False`.
+
+## Conditions of the reported measurements
+
+| Item | Value |
+|---|---|
+| Power | plugged in, Windows **Balanced** power plan (SPEC.md Section 5.5 recommends High performance, so the times are probably conservative); recorded in every `summary.json` and artifact manifest |
+| Threads | 6 (the physical core count) for PyTorch inference; `batch_size` 8 |
+| Cached pretrained weights | `resnet18-f37072fd.pth` and `wide_resnet50_2-95faca4d.pth` under `TORCH_HOME`, hash-verified |
+| Python launcher | `py -3.12`; virtual environment outside OneDrive |
+
+The file `requirements-lock.txt` is the output of `pip freeze` for this environment (the editable install of the project itself aside).
 
 ## Locations (all outside OneDrive)
 

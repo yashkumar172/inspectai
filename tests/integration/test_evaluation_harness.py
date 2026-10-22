@@ -188,3 +188,30 @@ def test_the_command_exits_two_for_an_object_missing_from_the_split_file(
 ) -> None:
     assert cli.main(["--model", "classical", "--category", "pcb1"]) == 2
     assert "ERROR" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"quantile": 0.0},
+        {"quantile": 1.5},
+        {"quantile": True},
+        {"eval_resolution": 4},
+        {"eval_resolution": "big"},
+        {"eval_resolution": 0},
+        {"bootstrap_resamples": 0},
+        {"split_seed": 1.5},
+        {"bootstrap_seed": "x"},
+        {"threshold_policy": "magic"},
+    ],
+)
+def test_invalid_evaluation_options_are_rejected_when_created(kwargs: dict[str, object]) -> None:
+    from inspectai.errors import EvaluationError
+
+    with pytest.raises(EvaluationError):
+        EvalOptions(**kwargs)  # type: ignore[arg-type]
+
+
+def test_valid_evaluation_options_are_accepted() -> None:
+    options = EvalOptions(quantile=1.0, eval_resolution=8, bootstrap_resamples=1, split_seed=-3)
+    assert options.quantile == 1.0 and options.split_seed == -3
