@@ -2,7 +2,7 @@
 
 CPU-friendly visual anomaly detection on the VisA dataset: a classical baseline, a Gaussian feature model, and a PatchCore-inspired model, with a Streamlit app. The full specification is in [SPEC.md](SPEC.md).
 
-**Status: Milestone 1 (dataset and preprocessing) implemented.** The package contains the dataset loader, split construction, image preprocessing, and the dataset validation command. It contains no detection code yet; nothing under "Planned" below exists.
+**Status: Milestone 2 (evaluation harness and classical baseline) implemented.** The package contains the dataset loader, splits, preprocessing, the metrics and threshold harness, the classical OpenCV baseline, and heatmap visualization. There is no deep-learning model yet; nothing under "Planned" below exists.
 
 ## Requirements
 
@@ -71,6 +71,28 @@ python scripts/validate_dataset.py --objects cashew pipe_fryum --write-splits
 
 `--write-splits` writes `split.json` (fit / calibration_normal / test, seed 42 by default) per object to `<INSPECTAI_ARTIFACT_DIR>\splits\<object>\`, and refuses to overwrite a different existing split. Exit codes: 0 success, 2 configuration or data error, 1 other failure.
 
+## Evaluate the classical baseline (Model A)
+
+```powershell
+python scripts/evaluate_model.py --model classical --category cashew
+python scripts/evaluate_model.py --model classical --category cashew --threshold-policy labeled_calibration
+```
+
+The baseline stores a per-pixel mean and standard deviation of the `fit` images. Until the artifact store exists (Milestone 3) it is fitted inside the command; test images are only scored. The default threshold is the 0.99 quantile of scores on `calibration_normal` (SPEC.md Section 3.5); `labeled_calibration` picks max-F1 on half of the test rows and reports on the other half (`test_eval`) only, stratified by label (defect-type stratification from `image_anno.csv` is not implemented). Pixel IoU/Dice are pooled over all test images at 256x256 and use a threshold from `calibration_normal` map values.
+
+Output goes to `<INSPECTAI_REPORT_DIR>\classical\<category>\`: `predictions.csv` (one row per image), `summary.json` (settings, split hashes, thresholds, metrics with sample counts and a 95% bootstrap CI for image AUROC, timings, memory, environment), and `examples\*.png`. Undefined metrics are `null` and listed in `undefined_metrics`.
+
+### Measured results (classical baseline, seed 42, split `test`, 256x256)
+
+These come from the runs above on the reference laptop (power mode not recorded). They are the baseline only; no other model is evaluated yet.
+
+| Category | Normal / anomalous | Image AUROC (95% CI) | Image AP | Pixel AUROC | F1 at threshold | Fit time | Predict latency |
+|---|---|---|---|---|---|---|---|
+| cashew | 50 / 100 | 0.701 (0.603-0.794) | 0.818 | 0.809 | 0.305 (recall 0.18, FPR 0.00) | 7.8 s | 13.6 ms |
+| pipe_fryum | 50 / 100 | 0.674 (0.587-0.759) | 0.818 | 0.963 | 0.148 (recall 0.08, FPR 0.00) | 7.2 s | 13.4 ms |
+
+The baseline is weak, as expected: it compares each pixel position with the average of the training images, so it responds to object shifts and shape differences more than to the small defects (see `examples\anomaly_highest_score.png`). With only 45 calibration images, the 0.99 quantile sits near their maximum, so the threshold is conservative (no false positives, but low recall). Pixel AUROC is high partly because most pixels are background that every map ranks low; read it with IoU and Dice in `summary.json`. A random ranking has image AP equal to the anomaly share of the test set (0.667).
+
 ## Planned (not implemented yet)
 
 These commands are described in SPEC.md Section 11 and do not exist yet:
@@ -78,7 +100,6 @@ These commands are described in SPEC.md Section 11 and do not exist yet:
 ```powershell
 python scripts/fetch_weights.py --backbone resnet18
 python scripts/fit_model.py --model patchcore --category cashew --profile dev
-python scripts/evaluate_model.py --model patchcore --category cashew
 streamlit run app.py
 ```
 
@@ -86,7 +107,7 @@ streamlit run app.py
 
 - [x] Milestone 0 — Repository inspection and setup
 - [x] Milestone 1 — Dataset and preprocessing (125 unit tests plus 3 real-dataset tests pass; real VisA validates with 0 errors)
-- [ ] Milestone 2 — Evaluation harness and classical baseline
+- [x] Milestone 2 — Evaluation harness and classical baseline
 - [ ] Milestone 3 — Feature extractor, Model B, and artifact store
 - [ ] Milestone 4 — PatchCore-inspired model
 - [ ] Milestone 5 — Comparison reports and additional categories
