@@ -1,6 +1,7 @@
 """Fit a model on one VisA category and save it as an artifact.
 
 Usage (PowerShell):
+    python scripts/fit_model.py --model classical --category cashew
     python scripts/fit_model.py --model gaussian --category cashew --profile dev
     python scripts/fit_model.py --model patchcore --category cashew --profile dev --coreset-ratio 0.1
 
@@ -21,10 +22,11 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from inspectai.artifacts.classical_io import save_classical
 from inspectai.artifacts.gaussian_io import save_gaussian
 from inspectai.artifacts.patchcore_io import save_patchcore
 from inspectai.artifacts.store import artifact_dir
-from inspectai.config import PROFILES, SplitConfig, load_paths
+from inspectai.config import PROFILES, SplitConfig, load_paths, resize_mode_for
 from inspectai.data.dataset import SUPPORTED_OBJECTS, VisADataset
 from inspectai.data.splits import make_splits, with_max_fit_images
 from inspectai.errors import (
@@ -40,6 +42,7 @@ from inspectai.errors import (
 )
 from inspectai.evaluation.runner import EvalOptions, calibrate, environment_info, fit_model
 from inspectai.evaluation.thresholds import DEFAULT_QUANTILE
+from inspectai.models.classical import ClassicalConfig, ClassicalModel
 from inspectai.models.features import FeatureExtractor, load_backbone
 from inspectai.models.gaussian import GaussianModel, gaussian_config_for
 from inspectai.models.patchcore import PatchCoreModel, patchcore_config_for
@@ -50,7 +53,7 @@ EXIT_DATA_ERROR = 2
 EXIT_ARTIFACT_ERROR = 3
 EXIT_WEIGHTS_UNAVAILABLE = 4
 
-MODELS = ("gaussian", "patchcore")
+MODELS = ("classical", "gaussian", "patchcore")
 logger = logging.getLogger("fit_model")
 
 
@@ -58,7 +61,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Fit a model and save its artifact.")
     parser.add_argument("--model", choices=MODELS, required=True)
     parser.add_argument("--category", choices=SUPPORTED_OBJECTS, required=True)
-    parser.add_argument("--profile", choices=tuple(PROFILES), default="dev")
+    parser.add_argument(
+        "--profile", choices=tuple(PROFILES), default="dev", help="gaussian and patchcore only."
+    )
     parser.add_argument("--feature-dim", type=int, default=100, help="gaussian only: channels (d).")
     parser.add_argument("--coreset-ratio", type=float, default=0.10, help="patchcore only.")
     parser.add_argument(
@@ -106,8 +111,10 @@ def _run(args: argparse.Namespace) -> int:
                 f"Fitting on a seeded subset of {len(splits.fit_used)} of {len(splits.fit)} "
                 "fit images (max_fit_images); the subset is recorded in split.json"
             )
-    model: GaussianModel | PatchCoreModel
-    if args.model == "gaussian":
+    model: ClassicalModel | GaussianModel | PatchCoreModel
+    if args.model == "classical":
+        model = ClassicalModel(ClassicalConfig(resize_mode=resize_mode_for(args.category)))
+    elif args.model == "gaussian":
         gaussian_config = gaussian_config_for(
             args.category, args.profile, args.feature_dim, args.seed
         )
@@ -138,7 +145,12 @@ def _run(args: argparse.Namespace) -> int:
     if (target / "manifest.json").exists():
         print(f"Replacing the existing artifact in {target}")
     fit_record = {**stats.to_dict(), "environment": environment_info()}
-    if isinstance(model, GaussianModel):
+    if isinstance(model, ClassicalModel):
+        save_classical(
+            target, model, args.category, splits, calibration.to_dict(), fit_record,
+            options.eval_resolution,
+        )  # fmt: skip
+    elif isinstance(model, GaussianModel):
         save_gaussian(
             target, model, args.category, splits, calibration.to_dict(), fit_record,
             options.eval_resolution,
@@ -152,8 +164,9 @@ def _run(args: argparse.Namespace) -> int:
             f"Memory bank: {model.bank_size} of {model.n_candidates} vectors "
             f"(coreset ratio {args.coreset_ratio}), coreset selection {model.coreset_seconds:.1f} s"
         )
+    profile_note = "" if args.model == "classical" else f" ({args.profile})"
     print(
-        f"Fitted {args.model} / {args.category} ({args.profile}) on {stats.n_fit_images} images "
+        f"Fitted {args.model} / {args.category}{profile_note} on {stats.n_fit_images} images "
         f"in {stats.fit_seconds:.1f} s, peak memory {stats.peak_memory_gb:.2f} GB"
     )
     print(

@@ -2,7 +2,7 @@
 
 CPU-friendly visual anomaly detection on the VisA dataset: a classical baseline, a Gaussian feature model, and a PatchCore-inspired model, with a Streamlit app. The full specification is in [SPEC.md](SPEC.md).
 
-**Status: Milestone 5 (comparison reports and additional categories) implemented; all four initial categories are measured with all five model configurations.** The package contains the dataset loader, splits, preprocessing, the metrics and threshold harness, the classical OpenCV baseline (Model A), a pretrained-CNN feature extractor, the Gaussian feature model (Model B), the PatchCore-inspired model (Model C), and a checked artifact store. The Streamlit app does not exist yet; nothing under "Planned" below exists.
+**Status: Milestone 6 (Streamlit app) implemented; Milestones 0-6 are done.** The package contains the dataset loader, splits, preprocessing, the metrics and threshold harness, the classical OpenCV baseline (Model A), a pretrained-CNN feature extractor, the Gaussian feature model (Model B), the PatchCore-inspired model (Model C), and a checked artifact store. The Streamlit app (`app.py`) runs the saved models, shows the evaluation results, and is tested.
 
 ## Requirements
 
@@ -78,7 +78,7 @@ python scripts/evaluate_model.py --model classical --category cashew
 python scripts/evaluate_model.py --model classical --category cashew --threshold-policy labeled_calibration
 ```
 
-The baseline stores a per-pixel mean and standard deviation of the `fit` images. It has no artifact and is fitted inside the command; test images are only scored. The default threshold is the 0.99 quantile of scores on `calibration_normal` (SPEC.md Section 3.5); `labeled_calibration` picks max-F1 on half of the test rows and reports on the other half (`test_eval`) only, stratified by label (defect-type stratification from `image_anno.csv` is not implemented). Pixel IoU/Dice are pooled over all test images at 256x256 and use a threshold from `calibration_normal` map values.
+The baseline stores a per-pixel mean and standard deviation of the `fit` images. `evaluate_model.py` fits it inside the command (about 8 s; test images are only scored). `python scripts/fit_model.py --model classical --category cashew` writes it as an artifact (two float32 arrays, no pretrained weights needed), which the app loads; the artifact reproduces the evaluation scores exactly. The default threshold is the 0.99 quantile of scores on `calibration_normal` (SPEC.md Section 3.5); `labeled_calibration` picks max-F1 on half of the test rows and reports on the other half (`test_eval`) only, stratified by label (defect-type stratification from `image_anno.csv` is not implemented). Pixel IoU/Dice are pooled over all test images at 256x256 and use a threshold from `calibration_normal` map values.
 
 Output goes to `<INSPECTAI_REPORT_DIR>\classical\<category>\`: `predictions.csv` (one row per image), `summary.json` (settings, split hashes, thresholds, metrics with sample counts and a 95% bootstrap CI for image AUROC, timings, memory, environment), and `examples\*.png`. Undefined metrics are `null` and listed in `undefined_metrics`.
 
@@ -354,13 +354,32 @@ Unweighted means over the four categories, for every model (undefined values wou
 - **Limits.** Four categories with 50 normal and 100 anomalous test images each, one seed, one machine: differences of a few AUROC points should not be over-read. Published VisA results are not compared because their protocols differ. The remaining eight VisA objects (PCBs, capsules, candles, macaroni) were not run; they have 600-1,000 normal images and would need the `dev` profile or `--max-fit-images` (SPEC.md Section 3.2).
 - **Run history.** An earlier batch for `chewinggum` and `fryum` was stopped by the environment because the machine ran low on memory. The missing runs were then repeated strictly one step at a time with about 7 GB of RAM free; every step exited cleanly, and no partial results were kept.
 
-## Planned (not implemented yet)
-
-These commands are described in SPEC.md Section 11 and do not exist yet (the app is Milestone 6):
+## Streamlit app (Milestone 6)
 
 ```powershell
 streamlit run app.py
 ```
+
+The app opens at `http://localhost:8501` and listens on this computer only (`.streamlit/config.toml` sets `address = "localhost"`; change it explicitly if you host the app). It needs the `INSPECTAI_*` environment variables (see above), fitted artifacts for the models you want to use, and, for the deep models, the cached pretrained weights (`python scripts/fetch_weights.py --backbone resnet18`). Fit the models you need first, for example `python scripts/fit_model.py --model classical --category cashew`.
+
+Pages:
+
+- **Home**: purpose, a short explanation of anomaly detection, which fitted models and categories exist on this computer (read from the artifact folders), how to upload an image, and limitations and intended use.
+- **Inspect an image**: choose a model and a category, upload a JPG, JPEG, or PNG image (up to 10 MB) or, if the local VisA dataset is available, pick one of its test images, and run the model. The page shows the original image, the anomaly heatmap, the overlay, the decision (`Normal` or `Anomaly detected`), the score next to the category's stored threshold, and the range (min / median / max) of the scores of the held-out normal images. It always shows the warning "Scores are only meaningful if the uploaded object matches the selected category." and states that the score is not a probability. The visualization (PNG) and the prediction details (JSON, with no file system paths) can be downloaded.
+- **Evaluation dashboard**: the metrics from the saved evaluation reports with the dataset split named: image AUROC and AP (with bootstrap intervals), pixel metrics, a model comparison with paired differences, a confusion matrix per model, measured fit time, latency and memory, and the saved example figures.
+- **About and limitations**: anomaly detection versus supervised classification, how each model builds its anomaly map, the pretrained weights and algorithms, known failure cases, dataset limitations, and the note that this is a research and educational prototype, not a certified quality-control system.
+
+What the app guarantees (each point is covered by tests):
+
+- **The decision is the stored one.** A model is loaded through the artifact store with all integrity checks and never refitted. The image is flagged when `score > threshold`, using the threshold stored in that model's artifact for that category. Heatmap colors use a fixed scale anchored at the stored pixel threshold, so a normal image is not stretched to look alarming.
+- **No fake results.** If the artifact is missing, fails its integrity checks, or the pretrained weights are not cached, the page says `Model unavailable` with the command that fixes it, and no score, heatmap, or decision is shown. If inference fails, a short message is shown and nothing is made up.
+- **Uploads are validated before any model runs**: size (10 MB, also enforced by `server.maxUploadSize`), file type, that the content really is JPEG or PNG, readable header, at most 4096 pixels per side, at least 32x32 pixels, an aspect ratio within 25% of the category's reference ratio (the median of its fit images, stored in the manifest), and only then decoding. Rejection messages never contain a path, the file name, or a stack trace. Streamlit's own exceptions are also hidden from users (`client.showErrorDetails = "none"`).
+- **Dashboard numbers are checked, not trusted.** Before a category is shown, each run's image-level metrics are re-derived from its saved `predictions.csv` and the runs must have used identical splits and settings; otherwise the category shows "did not pass validation" and no metrics. With no result files the page shows no metrics at all.
+- **No unnecessary external calls.** Usage statistics are off, weights are never downloaded by the app, and models are cached (`st.cache_resource`), so a rerun does not reload or refit anything.
+
+Using the VisA test images in the app requires the attribution already stated in the app and below: the images are CC BY 4.0, and the heatmaps and overlays are modified material.
+
+How it was verified: 30 tests drive the real pages with Streamlit's `AppTest` against synthetic artifacts (predictions equal the saved reports, every failure path, upload rejection with the model never invoked, path and stack-trace leak checks, dashboard validation), and 65 more cover upload validation (31), the predictor (22), and the dashboard data (12). In addition, with the real artifacts and pretrained weights, 20 inspections through the Inspect page (5 model configurations x 2 categories x one anomalous and one normal test image) reproduced the saved evaluation scores, thresholds, and decisions, and `streamlit run app.py` started and passed Streamlit's health check. A visual check in a browser was not possible in the development environment (the browser extension was unavailable), so the layout has not been reviewed on screen.
 
 ## Milestone checklist
 
@@ -370,7 +389,7 @@ streamlit run app.py
 - [x] Milestone 3 — Feature extractor, Model B, and artifact store
 - [x] Milestone 4 — PatchCore-inspired model
 - [x] Milestone 5 — Comparison reports and additional categories (comparison tooling; all four initial categories measured with all five configurations)
-- [ ] Milestone 6 — Streamlit application
+- [x] Milestone 6 — Streamlit application (tested with `AppTest` and real artifacts; the on-screen layout was not visually verified in a browser)
 - [ ] Milestone 7 — Final verification and delivery
 
 ## Troubleshooting
@@ -381,6 +400,8 @@ streamlit run app.py
 - **`WeightsNotFoundError` (exit code 4):** run `python scripts/fetch_weights.py --backbone resnet18` once; the weights are cached under `TORCH_HOME`.
 - **"The memory bank would need about N GB ... above max_bank_gb" (exit code 2):** lower `--max-fit-images` (a recorded, seeded subset), use the `dev` profile, or raise `--max-bank-gb` if you have the RAM.
 - **"Coreset selection exceeded the time limit" / "exceeded max_fit_minutes" (exit code 2):** use `--max-fit-images` or a smaller `--coreset-ratio`, or raise `--max-fit-minutes` and wait (a default fit takes about 11 minutes on the reference laptop).
+- **The app says `Model unavailable`:** the selected model has no saved artifact for that category, the artifact failed its integrity checks, or the pretrained weights are not cached. The message names the fix (`fit_model.py` or `fetch_weights.py`); use "Try loading again" afterwards. Details are in the app's console log, never in the browser.
+- **The app cannot find any model or result:** check that `INSPECTAI_DATA_ROOT`, `INSPECTAI_ARTIFACT_DIR`, and `INSPECTAI_REPORT_DIR` are set in the terminal that runs `streamlit run app.py`.
 - **`ArtifactError` (exit code 3):** the artifact is missing, corrupted, or stale. Run `scripts/fit_model.py` again with the same settings you evaluate with.
 
 ## Dataset attribution and licensing

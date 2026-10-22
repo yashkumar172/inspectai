@@ -47,7 +47,7 @@ class RunSpec:
 
 
 RUN_SPECS: tuple[RunSpec, ...] = (
-    RunSpec("A classical", "classical", None, "classical", None),
+    RunSpec("A classical", "classical", None, "classical", "classical"),
     RunSpec("B Gaussian dev", "gaussian", "dev", "gaussian", "gaussian"),
     RunSpec("B Gaussian full", "gaussian", "full", "gaussian-full", "gaussian-full"),
     RunSpec("C PatchCore-inspired dev", "patchcore", "dev", "patchcore", "patchcore"),
@@ -294,7 +294,7 @@ def check_comparable(runs: Sequence[Run]) -> None:
         raise EvaluationError("Runs are not comparable: " + "; ".join(problems))
 
 
-def _run_record(run: Run) -> dict:
+def run_record(run: Run) -> dict:
     summary = run.summary
     record: dict = {
         "label": run.spec.label,
@@ -320,7 +320,7 @@ def _run_record(run: Run) -> dict:
     return record
 
 
-def _paired_differences(runs: Sequence[Run]) -> list[dict]:
+def paired_auroc_differences(runs: Sequence[Run]) -> list[dict]:
     by_label = {r.spec.label: r for r in runs}
     out: list[dict] = []
     for label_a, label_b in PAIRS:
@@ -398,8 +398,8 @@ def build_comparison(
             "evaluation_split": first.summary["metrics"]["evaluation_split"],
             "evaluation_resolution": first.summary["metrics"]["evaluation_resolution"],
             "split_file_list_sha256": first.summary["split"]["file_list_sha256"],
-            "runs": [_run_record(run) for run in runs],
-            "paired_auroc_differences": _paired_differences(runs),
+            "runs": [run_record(run) for run in runs],
+            "paired_auroc_differences": paired_auroc_differences(runs),
             "not_measured": list((not_measured or {}).get(category, [])),
         }
         for run in runs:

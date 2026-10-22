@@ -35,3 +35,11 @@ class ArtifactError(InspectAIError):
 
 class WeightsNotFoundError(InspectAIError):
     """Pretrained weights are not in the local cache and may not be downloaded implicitly."""
+
+
+class UploadError(InspectAIError):
+    """An uploaded image is rejected; the message is safe to show to the user."""
+
+
+class ModelUnavailableError(InspectAIError):
+    """No fitted model exists for the requested model and category."""

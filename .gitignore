@@ -29,3 +29,6 @@ visa/
 # Misc
 .env
 .DS_Store
+
+# Streamlit secrets (the app uses none, but they must never be committed)
+.streamlit/secrets.toml

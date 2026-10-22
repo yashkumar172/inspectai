@@ -52,6 +52,7 @@ class ClassicalModel:
     def __init__(self, config: ClassicalConfig | None = None) -> None:
         self.config = config or ClassicalConfig()
         self.n_fit_images = 0
+        self.reference_aspect_ratio: float | None = None
         self._mean: NDArray[np.float32] | None = None
         self._std: NDArray[np.float32] | None = None
 
@@ -61,7 +62,9 @@ class ClassicalModel:
         total = np.zeros((size, size, 3), dtype=np.float64)
         total_sq = np.zeros((size, size, 3), dtype=np.float64)
         count = 0
+        aspects: list[float] = []
         for image in images:
+            aspects.append(image.shape[1] / image.shape[0])
             resized = self._resize(image).astype(np.float64)
             total += resized
             total_sq += resized * resized
@@ -73,6 +76,7 @@ class ClassicalModel:
         self._mean = mean.astype(np.float32)
         self._std = np.maximum(np.sqrt(variance), self.config.std_floor).astype(np.float32)
         self.n_fit_images = count
+        self.reference_aspect_ratio = float(np.median(aspects))
 
     def predict(self, image: ImageArray) -> Prediction:
         """Score one image; the map has the image's own height and width."""
@@ -91,3 +95,33 @@ class ClassicalModel:
     def _resize(self, image: ImageArray) -> NDArray[np.float32]:
         resized, _ = resize_to_square(image, self.config.image_size, self.config.resize_mode)
         return resized.astype(np.float32)
+
+    def tensors(self) -> dict[str, NDArray[np.float32]]:
+        """The fitted parameters: the per-pixel mean and standard deviation."""
+        if self._mean is None or self._std is None:
+            raise ModelError("The model has not been fitted")
+        return {"mean": self._mean.copy(), "std": self._std.copy()}
+
+    @classmethod
+    def from_tensors(
+        cls,
+        config: ClassicalConfig,
+        tensors: dict[str, NDArray],
+        n_fit_images: int,
+        reference_aspect_ratio: float | None,
+    ) -> ClassicalModel:
+        """Rebuild a fitted model from stored tensors, checking shapes and values."""
+        size = config.image_size
+        for name in ("mean", "std"):
+            array = tensors.get(name)
+            if array is None or tuple(array.shape) != (size, size, 3):
+                found = "missing" if array is None else tuple(array.shape)
+                raise ModelError(f"Tensor {name!r} has shape {found}, expected {(size, size, 3)}")
+        if not (tensors["std"] > 0).all():
+            raise ModelError("Tensor 'std' must be positive everywhere")
+        model = cls(config)
+        model._mean = tensors["mean"].astype(np.float32)
+        model._std = tensors["std"].astype(np.float32)
+        model.n_fit_images = n_fit_images
+        model.reference_aspect_ratio = reference_aspect_ratio
+        return model

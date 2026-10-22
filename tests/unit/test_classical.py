@@ -117,3 +117,43 @@ def test_the_baseline_runs_on_the_cpu_with_numpy_and_opencv_only() -> None:
     source = Path(module.__file__).read_text(encoding="utf-8")
     assert "import torch" not in source and "from torch" not in source
     assert _fitted().predict(_normal_images(1)[0]).score >= 0.0
+
+
+# ----- tensors and aspect ratio (for the saved artifact) -------------------------------------
+
+
+def test_the_reference_aspect_ratio_is_the_median_of_the_fit_images() -> None:
+    model = ClassicalModel(ClassicalConfig(image_size=32, resize_mode="stretch"))
+    wide = _normal_images(4, 30, 60, seed=1) + _normal_images(4, 30, 60, seed=2)
+    model.fit(_normal_images(4, 40, 40) + wide)
+    assert model.reference_aspect_ratio == pytest.approx(2.0)
+
+
+def test_tensors_round_trip_and_give_identical_predictions() -> None:
+    model = _fitted("letterbox")
+    tensors = model.tensors()
+    assert set(tensors) == {"mean", "std"} and tensors["mean"].shape == (32, 32, 3)
+    assert tensors["mean"].dtype == np.float32 and (tensors["std"] > 0).all()
+    clone = ClassicalModel.from_tensors(
+        model.config, tensors, model.n_fit_images, model.reference_aspect_ratio
+    )
+    image = _normal_images(1, seed=8)[0]
+    assert model.predict(image).score == clone.predict(image).score
+    assert np.array_equal(model.predict(image).anomaly_map, clone.predict(image).anomaly_map)
+    tensors["mean"][0, 0, 0] = -123.0  # the returned tensors are copies of the model state
+    assert model.tensors()["mean"][0, 0, 0] != -123.0
+
+
+def test_from_tensors_rejects_wrong_shapes_and_non_positive_std() -> None:
+    model = _fitted()
+    config = model.config
+    good = model.tensors()
+    for bad in (
+        {"mean": good["mean"][:, :5], "std": good["std"]},
+        {"mean": good["mean"]},
+        {"mean": good["mean"], "std": np.zeros_like(good["std"])},
+    ):
+        with pytest.raises(ModelError):
+            ClassicalModel.from_tensors(config, bad, 12, None)
+    with pytest.raises(ModelError, match="not been fitted"):
+        ClassicalModel().tensors()

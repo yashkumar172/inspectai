@@ -1,0 +1,14 @@
+[server]
+# SPEC.md Section 8: uploads are limited to 10 MB (also validated again before inference).
+maxUploadSize = 10
+# Listen on this computer only by default; a hosted deployment overrides this explicitly.
+address = "localhost"
+
+[browser]
+# No usage statistics or other unnecessary external calls.
+gatherUsageStats = false
+
+[client]
+# SPEC.md Section 8: never show internal details or stack traces to users, even for exceptions
+# raised by Streamlit itself.
+showErrorDetails = "none"

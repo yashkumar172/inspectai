@@ -4,7 +4,6 @@ import csv
 import importlib.util
 import json
 import shutil
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from types import ModuleType
 
@@ -12,99 +11,15 @@ import cv2
 import numpy as np
 import pytest
 from fake_backbone import FakeBackbone
-from make_synthetic import SyntheticVisA, build_synthetic_visa
+from make_world import CATEGORIES, FAKE_WEIGHTS, World
 
-from inspectai.artifacts.gaussian_io import save_gaussian
-from inspectai.artifacts.patchcore_io import save_patchcore
-from inspectai.config import SplitConfig, resize_mode_for
+from inspectai.config import SplitConfig
 from inspectai.data.dataset import VisADataset
 from inspectai.data.splits import make_splits
-from inspectai.evaluation.report import write_predictions_csv, write_summary_json
-from inspectai.evaluation.runner import (
-    EvalOptions,
-    calibrate,
-    evaluate_fitted,
-    fit_model,
-    run_evaluation,
-)
-from inspectai.models.classical import ClassicalConfig, ClassicalModel
-from inspectai.models.features import FeatureExtractor, WeightsInfo
-from inspectai.models.gaussian import GaussianModel, gaussian_config_for
-from inspectai.models.patchcore import PatchCoreModel, patchcore_config_for
+from inspectai.models.gaussian import GaussianModel
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "compare_models.py"
-FAKE_WEIGHTS = WeightsInfo("fake", "injected", None)
-OPTIONS = EvalOptions(eval_resolution=32, bootstrap_resamples=60)
 ARGS = ["--feature-dim", "20", "--coreset-ratio", "0.02"]
-CATEGORIES = ("cashew", "pipe_fryum")
-
-
-@dataclass(frozen=True)
-class World:
-    synthetic: SyntheticVisA
-    reports: Path
-    artifacts: Path
-
-
-def _write(folder: Path, result) -> None:
-    write_predictions_csv(folder / "predictions.csv", result.rows)
-    write_summary_json(folder / "summary.json", result.summary)
-
-
-@pytest.fixture(scope="module")
-def world(tmp_path_factory: pytest.TempPathFactory) -> World:
-    root = tmp_path_factory.mktemp("comparison world")
-    synthetic = build_synthetic_visa(root / "data root", objects=CATEGORIES)
-    reports, artifacts = root / "reports out", root / "artifacts out"
-    dataset = VisADataset(synthetic.split_csv, synthetic.images_root)
-    for category in CATEGORIES:
-        splits = make_splits(dataset.samples, category, SplitConfig())
-
-        classical_config = ClassicalConfig(resize_mode=resize_mode_for(category))
-        classical = run_evaluation(
-            ClassicalModel(classical_config),
-            "classical",
-            asdict(classical_config),
-            dataset,
-            splits,
-            OPTIONS,
-        )
-        _write(reports / "classical" / category, classical)
-
-        gaussian_config = gaussian_config_for(category, "dev", 20, 42)
-        gaussian = GaussianModel(
-            gaussian_config, FeatureExtractor(FakeBackbone(), gaussian_config.layers), FAKE_WEIGHTS
-        )
-        stats = fit_model(gaussian, dataset, splits)
-        calibration = calibrate(gaussian, dataset, splits, OPTIONS)
-        result = evaluate_fitted(
-            gaussian, "gaussian", gaussian_config.to_dict(), dataset, splits, OPTIONS,
-            calibration, stats.to_dict(),
-        )  # fmt: skip
-        save_gaussian(
-            artifacts / "gaussian" / category, gaussian, category, splits,
-            calibration.to_dict(), stats.to_dict(), OPTIONS.eval_resolution,
-        )  # fmt: skip
-        _write(reports / "gaussian" / category, result)
-
-        patchcore_config = patchcore_config_for(category, "dev", 0.02, 42)
-        patchcore = PatchCoreModel(
-            patchcore_config,
-            FeatureExtractor(FakeBackbone(), patchcore_config.layers),
-            FAKE_WEIGHTS,
-        )
-        stats = fit_model(patchcore, dataset, splits)
-        calibration = calibrate(patchcore, dataset, splits, OPTIONS)
-        result = evaluate_fitted(
-            patchcore, "patchcore", patchcore_config.to_dict(), dataset, splits, OPTIONS,
-            calibration, stats.to_dict(),
-        )  # fmt: skip
-        save_patchcore(
-            artifacts / "patchcore" / category, patchcore, category, splits,
-            calibration.to_dict(), stats.to_dict(), OPTIONS.eval_resolution,
-        )  # fmt: skip
-        _write(reports / "patchcore" / category, result)
-    return World(synthetic, reports, artifacts)
 
 
 @pytest.fixture(scope="module")
