@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inspectai"
+version = "0.1.0"
+description = "InspectAI: CPU-friendly industrial visual anomaly detection (VisA)."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "torch>=2.14,<3",
+    "torchvision>=0.29,<1",
+    "numpy>=2.5,<3",
+    "opencv-python-headless>=5.0,<6",
+    "pillow>=12.3,<13",
+    "scikit-learn>=1.9,<2",
+    "safetensors>=0.8,<1",
+    "psutil>=7.2,<8",
+    "pyyaml>=6.0,<7",
+    "streamlit>=1.66,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.1,<10",
+    "ruff>=0.17,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = '-m "not slow and not needs_dataset"'
+markers = [
+    "slow: uses real pretrained weights or the real dataset",
+    "needs_dataset: requires the VisA dataset under INSPECTAI_DATA_ROOT",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]

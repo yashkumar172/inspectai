@@ -1,0 +1,31 @@
+﻿# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Project data and outputs (live outside the repo; see SPEC.md Section 9.2)
+data/*
+artifacts/*
+reports/*
+!data/README.md
+!artifacts/README.md
+!reports/README.md
+*.safetensors
+*.pt
+*.pth
+
+# Dataset archives and extracted dataset folders (safety net; the data lives outside the repo)
+*.tar
+*.tar.xz
+VisA/
+visa/
+
+# Misc
+.env
+.DS_Store
