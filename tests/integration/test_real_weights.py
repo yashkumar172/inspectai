@@ -73,3 +73,33 @@ def test_real_wide_resnet50_2_weights_give_the_full_profile_feature_shape() -> N
     assert info.identifier == "IMAGENET1K_V1" and info.sha256.startswith("95faca4d")
     embedding = FeatureExtractor(backbone, ("layer2", "layer3")).embed(torch.zeros(1, 3, 224, 224))
     assert embedding.shape == (1, 512 + 1024, 28, 28)
+
+
+@pytest.mark.needs_dataset
+def test_model_c_with_real_weights_ranks_anomalies_above_normals(resnet18) -> None:
+    """A small real fit (40 images, 10% coreset): anomalous test images score higher."""
+    from inspectai.config import SplitConfig, load_paths
+    from inspectai.data.dataset import VisADataset
+    from inspectai.data.splits import make_splits
+    from inspectai.models.patchcore import PatchCoreModel, patchcore_config_for
+
+    paths = load_paths()
+    if not paths.split_csv.is_file() or not paths.visa_images_root.is_dir():
+        pytest.skip("VisA dataset not found under INSPECTAI_DATA_ROOT")
+    dataset = VisADataset.from_paths(paths)
+    splits = make_splits(dataset.samples, "cashew", SplitConfig())
+    by_rel = {s.image_rel: s for s in dataset.get_samples("cashew")}
+    backbone, weights = resnet18
+    config = patchcore_config_for("cashew", "dev", coreset_ratio=0.1)
+    model = PatchCoreModel(config, FeatureExtractor(backbone, config.layers), weights)
+    model.fit([dataset.load_image(by_rel[n]) for n in splits.fit[:40]])
+    assert model.n_candidates == 40 * 784 and model.bank_size == round(0.1 * 40 * 784)
+    assert model.feature_dim == 384 and model.feature_map_shape == (28, 28)
+    test = [by_rel[n] for n in splits.test]
+    normal = [s for s in test if not s.is_anomalous][:10]
+    anomalous = [s for s in test if s.is_anomalous][:10]
+    scores_normal = [model.predict(dataset.load_image(s)).score for s in normal]
+    scores_anomalous = [model.predict(dataset.load_image(s)).score for s in anomalous]
+    assert np.mean(scores_anomalous) > np.mean(scores_normal)
+    image = dataset.load_image(anomalous[0])
+    assert model.predict(image).anomaly_map.shape == image.shape[:2]

@@ -40,6 +40,10 @@ CONFIG = "config.snapshot.yaml"
 DATA_FILES = (TENSORS, SPLIT, CONFIG)
 ALLOWED_DTYPES = ("float32", "float16", "int64")
 _FORBIDDEN_SUFFIXES = frozenset({".pkl", ".pickle", ".pt", ".pth", ".joblib", ".npy", ".npz"})
+# A snapshot may hold resource settings under this key (chunk sizes, limits, thread counts). They
+# are part of "the exact configuration used" and are stored, but they do not define the fitted
+# model, so they are ignored when deciding whether an artifact is stale.
+RUNTIME_KEY = "runtime"
 _RESERVED_KEYS = frozenset(
     {
         "schema_version",
@@ -149,8 +153,9 @@ def load_artifact(
     Checks: manifest readable and `schema_version` known; no pickle-style files; the data files
     listed and matching their SHA-256; tensors loadable as safetensors with the shapes and
     dtypes of the manifest and no NaN or infinity; `split.json` valid with no overlap between
-    parts; and, if `expected_config` is given, a config snapshot equal to it (a different
-    snapshot means the artifact is stale for the requested configuration).
+    parts; and, if `expected_config` is given, a config snapshot equal to it, apart from the
+    `runtime` section (a different snapshot means the artifact is stale for the requested
+    configuration).
     """
     directory = Path(directory)
     if not directory.is_dir():
@@ -184,12 +189,16 @@ def load_artifact(
     tensors = _load_tensors(directory / TENSORS, manifest)
     split = _load_split(directory / SPLIT, manifest)
     config = _load_config(directory / CONFIG)
-    if expected_config is not None and config != expected_config:
+    if expected_config is not None and _model_part(config) != _model_part(expected_config):
         raise ArtifactError(
             "The artifact was fitted with a different configuration than requested (stale); "
             "fit the model again."
         )
     return LoadedArtifact(directory, manifest, tensors, split, config)
+
+
+def _model_part(config: dict[str, object]) -> dict[str, object]:
+    return {key: value for key, value in config.items() if key != RUNTIME_KEY}
 
 
 def _read_manifest(directory: Path) -> dict[str, object]:

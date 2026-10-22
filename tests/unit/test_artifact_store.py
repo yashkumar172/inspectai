@@ -299,3 +299,15 @@ def test_resaving_replaces_the_artifact_and_an_interrupted_save_does_not_load(sa
     (saved / MANIFEST).unlink()  # what an interrupted save looks like: no manifest yet
     with pytest.raises(ArtifactError):
         load_artifact(saved)
+
+
+def test_the_runtime_section_is_stored_but_ignored_by_the_stale_check(tmp_path: Path) -> None:
+    config = {**CONFIG_DICT, "runtime": {"chunk_size": 8, "max_bank_gb": 4.0}}
+    directory = tmp_path / "rt"
+    save_artifact(directory, "gaussian", "cashew", _tensors(), _split(), config, INFO)
+    assert load_artifact(directory).config == config  # the exact configuration is kept
+    assert load_artifact(directory, expected_config=CONFIG_DICT).config == config
+    other_runtime = {**CONFIG_DICT, "runtime": {"chunk_size": 999}}
+    assert load_artifact(directory, expected_config=other_runtime).config == config
+    with pytest.raises(ArtifactError, match="stale"):
+        load_artifact(directory, expected_config={**CONFIG_DICT, "d": 4})

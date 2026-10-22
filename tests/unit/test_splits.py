@@ -185,3 +185,76 @@ def test_load_rejects_unknown_schema_missing_fields_and_unreadable_files(
     broken.write_text("{not json", encoding="utf-8")
     with pytest.raises(SplitError, match="could not be read"):
         load_split(broken)
+
+
+# ----- max_fit_images (SPEC.md Section 5.5) -------------------------------------------------
+
+
+def test_the_fit_set_can_be_capped_to_a_seeded_random_subset(samples: list[Sample]) -> None:
+    from inspectai.data.splits import with_max_fit_images
+
+    split = make_splits(samples, "cashew")
+    capped = with_max_fit_images(split, 6)
+    assert capped.max_fit_images == 6 and len(capped.fit_used or ()) == 6
+    assert set(capped.fit_used or ()) <= set(split.fit) and capped.fit_files == capped.fit_used
+    assert capped.fit == split.fit  # the full fit split is still recorded
+    assert capped.calibration_normal == split.calibration_normal and capped.test == split.test
+    assert with_max_fit_images(split, 6) == capped  # reproducible
+    other_seed = with_max_fit_images(make_splits(samples, "cashew", SplitConfig(seed=7)), 6)
+    assert other_seed.fit_used != capped.fit_used
+
+
+def test_a_cap_at_or_above_the_fit_size_changes_nothing(samples: list[Sample]) -> None:
+    from inspectai.data.splits import with_max_fit_images
+
+    split = make_splits(samples, "cashew")
+    assert with_max_fit_images(split, len(split.fit)) is split
+    assert with_max_fit_images(split, 1000).fit_files == split.fit
+
+
+@pytest.mark.parametrize("bad", [0, -1, True])
+def test_an_invalid_cap_is_rejected(samples: list[Sample], bad: int) -> None:
+    from inspectai.data.splits import with_max_fit_images
+
+    with pytest.raises(SplitError, match="max_fit_images"):
+        with_max_fit_images(make_splits(samples, "cashew"), bad)
+
+
+def test_the_cap_is_recorded_in_split_json_and_survives_a_round_trip(
+    samples: list[Sample], tmp_path: Path
+) -> None:
+    from inspectai.data.splits import with_max_fit_images
+
+    capped = with_max_fit_images(make_splits(samples, "cashew"), 5)
+    data = capped.to_dict()
+    assert data["max_fit_images"] == 5 and data["counts"]["fit_used"] == 5  # type: ignore[index]
+    assert data["file_list_sha256"]["fit_used"] == file_list_sha256(capped.fit_used or ())  # type: ignore[index]
+    save_split(capped, tmp_path / "s.json")
+    assert load_split(tmp_path / "s.json") == capped
+
+
+def test_an_uncapped_split_json_has_no_cap_fields(samples: list[Sample]) -> None:
+    data = make_splits(samples, "cashew").to_dict()
+    assert "fit_used" not in data and "max_fit_images" not in data
+
+
+def test_a_tampered_or_inconsistent_cap_is_rejected(samples: list[Sample], tmp_path: Path) -> None:
+    from inspectai.data.splits import with_max_fit_images
+
+    capped = with_max_fit_images(make_splits(samples, "cashew"), 5)
+    save_split(capped, tmp_path / "s.json")
+    data = json.loads((tmp_path / "s.json").read_text(encoding="utf-8"))
+
+    changed = dict(data, fit_used=[*data["fit_used"][:-1], data["test"][0]])  # a test file
+    (tmp_path / "t.json").write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(SplitError, match="SHA-256"):
+        load_split(tmp_path / "t.json")  # the recorded hash no longer matches
+
+    changed["file_list_sha256"] = dict(data["file_list_sha256"])
+    changed["file_list_sha256"]["fit_used"] = file_list_sha256(changed["fit_used"])
+    (tmp_path / "t.json").write_text(json.dumps(changed), encoding="utf-8")
+    with pytest.raises(SplitError, match="outside fit"):
+        load_split(tmp_path / "t.json")  # consistent hashes cannot hide a file outside fit
+
+    with pytest.raises(SplitError, match="positive max_fit_images"):
+        dataclasses.replace(capped, max_fit_images=None).validate()

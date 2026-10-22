@@ -370,3 +370,22 @@ def test_evaluating_without_cached_weights_exits_four(
     monkeypatch.setattr("inspectai.artifacts.gaussian_io.load_backbone", real_loader)
     assert evaluate_cli.main(FIT) == 4  # the artifact is fine; the cache under TORCH_HOME is empty
     assert "fetch_weights.py --backbone resnet18" in capsys.readouterr().err
+
+
+def test_max_fit_images_also_caps_a_gaussian_fit_and_is_recorded(
+    fit_cli: ModuleType, evaluate_cli: ModuleType, env: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from inspectai.data.splits import load_split
+
+    assert fit_cli.main([*FIT, "--max-fit-images", "6"]) == 0
+    assert "subset of 6 of 14" in capsys.readouterr().out
+    directory = env / "artifacts out" / "gaussian" / "cashew"
+    saved = load_split(directory / "split.json")
+    assert saved.max_fit_images == 6 and len(saved.fit_used or ()) == 6
+    manifest = json.loads((directory / MANIFEST).read_text(encoding="utf-8"))
+    assert manifest["n_fit_images"] == 6 and manifest["fit_stats"]["n_fit_images"] == 6
+    assert evaluate_cli.main(FIT) == 0
+    summary = json.loads(
+        (env / "reports out" / "gaussian" / "cashew" / "summary.json").read_text(encoding="utf-8")
+    )
+    assert summary["split"]["max_fit_images"] == 6

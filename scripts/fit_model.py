@@ -2,6 +2,7 @@
 
 Usage (PowerShell):
     python scripts/fit_model.py --model gaussian --category cashew --profile dev
+    python scripts/fit_model.py --model patchcore --category cashew --profile dev --coreset-ratio 0.1
 
 The model is fitted on the `fit` split only. Thresholds are then selected from the
 `calibration_normal` split (SPEC.md Section 3.5) and stored in the artifact, together with the
@@ -21,10 +22,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from inspectai.artifacts.gaussian_io import save_gaussian
+from inspectai.artifacts.patchcore_io import save_patchcore
 from inspectai.artifacts.store import artifact_dir
 from inspectai.config import PROFILES, SplitConfig, load_paths
 from inspectai.data.dataset import SUPPORTED_OBJECTS, VisADataset
-from inspectai.data.splits import make_splits
+from inspectai.data.splits import make_splits, with_max_fit_images
 from inspectai.errors import (
     ArtifactError,
     ConfigError,
@@ -40,6 +42,7 @@ from inspectai.evaluation.runner import EvalOptions, calibrate, environment_info
 from inspectai.evaluation.thresholds import DEFAULT_QUANTILE
 from inspectai.models.features import FeatureExtractor, load_backbone
 from inspectai.models.gaussian import GaussianModel, gaussian_config_for
+from inspectai.models.patchcore import PatchCoreModel, patchcore_config_for
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
@@ -47,7 +50,7 @@ EXIT_DATA_ERROR = 2
 EXIT_ARTIFACT_ERROR = 3
 EXIT_WEIGHTS_UNAVAILABLE = 4
 
-MODELS = ("gaussian",)
+MODELS = ("gaussian", "patchcore")
 logger = logging.getLogger("fit_model")
 
 
@@ -56,7 +59,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", choices=MODELS, required=True)
     parser.add_argument("--category", choices=SUPPORTED_OBJECTS, required=True)
     parser.add_argument("--profile", choices=tuple(PROFILES), default="dev")
-    parser.add_argument("--feature-dim", type=int, default=100, help="Channels kept (d).")
+    parser.add_argument("--feature-dim", type=int, default=100, help="gaussian only: channels (d).")
+    parser.add_argument("--coreset-ratio", type=float, default=0.10, help="patchcore only.")
+    parser.add_argument(
+        "--max-fit-images",
+        type=int,
+        help="Fit on a seeded random subset of this many fit images (recorded in split.json).",
+    )
+    parser.add_argument("--max-bank-gb", type=float, default=4.0, help="patchcore only.")
+    parser.add_argument("--max-fit-minutes", type=float, default=30.0, help="patchcore only.")
+    parser.add_argument("--chunk-size", type=int, default=16384, help="patchcore only.")
     parser.add_argument("--quantile", type=float, default=DEFAULT_QUANTILE)
     parser.add_argument("--seed", type=int, default=SplitConfig().seed)
     parser.add_argument(
@@ -87,9 +99,36 @@ def _run(args: argparse.Namespace) -> int:
     paths = load_paths()
     dataset = VisADataset.from_paths(paths)
     splits = make_splits(dataset.samples, args.category, SplitConfig(seed=args.seed))
-    config = gaussian_config_for(args.category, args.profile, args.feature_dim, args.seed)
-    backbone, weights = load_backbone(config.backbone)
-    model = GaussianModel(config, FeatureExtractor(backbone, config.layers), weights)
+    if args.max_fit_images is not None:
+        splits = with_max_fit_images(splits, args.max_fit_images)
+        if splits.fit_used is not None:
+            print(
+                f"Fitting on a seeded subset of {len(splits.fit_used)} of {len(splits.fit)} "
+                "fit images (max_fit_images); the subset is recorded in split.json"
+            )
+    model: GaussianModel | PatchCoreModel
+    if args.model == "gaussian":
+        gaussian_config = gaussian_config_for(
+            args.category, args.profile, args.feature_dim, args.seed
+        )
+        backbone, weights = load_backbone(gaussian_config.backbone)
+        model = GaussianModel(
+            gaussian_config, FeatureExtractor(backbone, gaussian_config.layers), weights
+        )
+    else:
+        patchcore_config = patchcore_config_for(
+            args.category,
+            args.profile,
+            args.coreset_ratio,
+            args.seed,
+            chunk_size=args.chunk_size,
+            max_bank_gb=args.max_bank_gb,
+            max_fit_minutes=args.max_fit_minutes,
+        )
+        backbone, weights = load_backbone(patchcore_config.backbone)
+        model = PatchCoreModel(
+            patchcore_config, FeatureExtractor(backbone, patchcore_config.layers), weights
+        )
 
     stats = fit_model(model, dataset, splits)
     options = EvalOptions(quantile=args.quantile, split_seed=args.seed)
@@ -98,15 +137,21 @@ def _run(args: argparse.Namespace) -> int:
     target = args.output_dir or artifact_dir(paths.artifact_dir, args.model, args.category)
     if (target / "manifest.json").exists():
         print(f"Replacing the existing artifact in {target}")
-    save_gaussian(
-        target,
-        model,
-        args.category,
-        splits,
-        calibration.to_dict(),
-        {**stats.to_dict(), "environment": environment_info()},
-        options.eval_resolution,
-    )
+    fit_record = {**stats.to_dict(), "environment": environment_info()}
+    if isinstance(model, GaussianModel):
+        save_gaussian(
+            target, model, args.category, splits, calibration.to_dict(), fit_record,
+            options.eval_resolution,
+        )  # fmt: skip
+    else:
+        save_patchcore(
+            target, model, args.category, splits, calibration.to_dict(), fit_record,
+            options.eval_resolution,
+        )  # fmt: skip
+        print(
+            f"Memory bank: {model.bank_size} of {model.n_candidates} vectors "
+            f"(coreset ratio {args.coreset_ratio}), coreset selection {model.coreset_seconds:.1f} s"
+        )
     print(
         f"Fitted {args.model} / {args.category} ({args.profile}) on {stats.n_fit_images} images "
         f"in {stats.fit_seconds:.1f} s, peak memory {stats.peak_memory_gb:.2f} GB"

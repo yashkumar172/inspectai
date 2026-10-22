@@ -11,7 +11,7 @@ import hashlib
 import json
 import random
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from inspectai.config import SplitConfig
@@ -33,6 +33,15 @@ class SplitResult:
     fit: tuple[str, ...]
     calibration_normal: tuple[str, ...]
     test: tuple[str, ...]
+    # Set only when the fit set was capped with `with_max_fit_images` (SPEC.md Section 5.5):
+    # the seeded random subset of `fit` that the model is actually fitted on.
+    max_fit_images: int | None = None
+    fit_used: tuple[str, ...] | None = None
+
+    @property
+    def fit_files(self) -> tuple[str, ...]:
+        """The images the model is fitted on: the capped subset if there is one, else `fit`."""
+        return self.fit if self.fit_used is None else self.fit_used
 
     def validate(self) -> None:
         """Raise SplitError unless the parts are non-empty (fit, test), unique, and disjoint."""
@@ -48,6 +57,13 @@ class SplitResult:
             raise SplitError(f"{self.object_name}: the fit split is empty")
         if not self.test:
             raise SplitError(f"{self.object_name}: the test split is empty")
+        if self.fit_used is not None:
+            if self.max_fit_images is None or self.max_fit_images < 1:
+                raise SplitError(f"{self.object_name}: fit_used needs a positive max_fit_images")
+            if len(set(self.fit_used)) != len(self.fit_used) or not self.fit_used:
+                raise SplitError(f"{self.object_name}: fit_used is empty or has duplicates")
+            if not set(self.fit_used) <= set(self.fit):
+                raise SplitError(f"{self.object_name}: fit_used contains files outside fit")
         fit, cal, test = set(self.fit), set(self.calibration_normal), set(self.test)
         for first, second, label in (
             (fit, cal, "fit and calibration_normal"),
@@ -63,6 +79,15 @@ class SplitResult:
                 )
 
     def to_dict(self) -> dict[str, object]:
+        data = self._base_dict()
+        if self.fit_used is not None:
+            data["max_fit_images"] = self.max_fit_images
+            data["fit_used"] = list(self.fit_used)
+            data["counts"]["fit_used"] = len(self.fit_used)  # type: ignore[index]
+            data["file_list_sha256"]["fit_used"] = file_list_sha256(self.fit_used)  # type: ignore[index]
+        return data
+
+    def _base_dict(self) -> dict[str, object]:
         return {
             "schema_version": SCHEMA_VERSION,
             "object": self.object_name,
@@ -89,6 +114,23 @@ def file_list_sha256(files: Sequence[str]) -> str:
     """SHA-256 of the sorted file names joined by newlines."""
     joined = "\n".join(sorted(files))
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def with_max_fit_images(split: SplitResult, max_fit_images: int) -> SplitResult:
+    """Cap the fit set to a seeded random subset of `max_fit_images` images.
+
+    The subset is recorded in the split (and so in `split.json`), never applied silently. If the
+    fit split is already that small, the split is returned unchanged.
+    """
+    if isinstance(max_fit_images, bool) or max_fit_images < 1:
+        raise SplitError(f"max_fit_images must be at least 1, got {max_fit_images!r}")
+    if max_fit_images >= len(split.fit):
+        return split
+    rng = random.Random(f"{split.seed}:{split.object_name}:max_fit_images:{max_fit_images}")
+    chosen = tuple(sorted(rng.sample(sorted(split.fit), max_fit_images)))
+    result = replace(split, max_fit_images=max_fit_images, fit_used=chosen)
+    result.validate()
+    return result
 
 
 def make_splits(
@@ -170,18 +212,28 @@ def load_split(path: Path) -> SplitResult:
     try:
         parts = {name: tuple(data[name]) for name in _PARTS}
         hashes = data["file_list_sha256"]
+        capped: dict[str, object] = {}
+        if "fit_used" in data:
+            capped = {
+                "max_fit_images": int(data["max_fit_images"]),
+                "fit_used": tuple(data["fit_used"]),
+            }
+            parts_to_hash = {**parts, "fit_used": capped["fit_used"]}
+        else:
+            parts_to_hash = parts
         result = SplitResult(
             object_name=str(data["object"]),
             seed=int(data["seed"]),
             calibration_fraction=float(data["calibration_fraction"]),
             min_calibration=int(data["min_calibration"]),
             **parts,
+            **capped,
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise SplitError(f"Split file is missing fields or has invalid values: {path}") from exc
-    if not all(isinstance(name, str) for files in parts.values() for name in files):
+    if not all(isinstance(name, str) for files in parts_to_hash.values() for name in files):
         raise SplitError("Split file lists must contain file names (strings)")
-    for name, files in parts.items():
+    for name, files in parts_to_hash.items():
         if not isinstance(hashes, dict) or hashes.get(name) != file_list_sha256(files):
             raise SplitError(f"Split file list '{name}' does not match its recorded SHA-256")
     result.validate()

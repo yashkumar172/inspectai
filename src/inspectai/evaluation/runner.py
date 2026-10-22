@@ -14,7 +14,7 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -55,6 +55,7 @@ from inspectai.evaluation.thresholds import (
     split_labeled_calibration,
 )
 from inspectai.models.base import AnomalyModel, Prediction
+from inspectai.preprocessing.images import ImageArray
 from inspectai.visualization.heatmaps import prediction_panel, save_rgb_png
 
 logger = logging.getLogger(__name__)
@@ -315,25 +316,39 @@ def _split_samples(
 ) -> tuple[list[Sample], list[Sample], list[Sample]]:
     by_rel = {s.image_rel: s for s in dataset.get_samples(splits.object_name)}
     missing = [
-        n for n in (*splits.fit, *splits.calibration_normal, *splits.test) if n not in by_rel
+        n for n in (*splits.fit_files, *splits.calibration_normal, *splits.test) if n not in by_rel
     ]
     if missing:
         raise EvaluationError(
             f"{len(missing)} files of the split are not in the split file, for example {missing[0]}"
         )
     return (
-        [by_rel[n] for n in splits.fit],
+        [by_rel[n] for n in splits.fit_files],
         [by_rel[n] for n in splits.calibration_normal],
         [by_rel[n] for n in splits.test],
     )
 
 
+class _LazyImages:
+    """Loads images one at a time but reports its length, so a model can check memory first."""
+
+    def __init__(self, dataset: VisADataset, samples: Sequence[Sample]) -> None:
+        self._dataset, self._samples = dataset, samples
+
+    def __len__(self) -> int:
+        return len(self._samples)
+
+    def __iter__(self) -> Iterator[ImageArray]:
+        for sample in self._samples:
+            yield self._dataset.load_image(sample)
+
+
 def fit_model(model: AnomalyModel, dataset: VisADataset, splits: SplitResult) -> FitStats:
-    """Fit on the `fit` split only and measure time and peak memory."""
+    """Fit on the `fit` split only (or its recorded `max_fit_images` subset), measuring cost."""
     fit_samples, _, _ = _split_samples(dataset, splits)
     logger.info("Fitting on %d images of %s", len(fit_samples), splits.object_name)
     start = time.perf_counter()
-    model.fit(dataset.load_image(s) for s in fit_samples)
+    model.fit(_LazyImages(dataset, fit_samples))
     seconds = time.perf_counter() - start
     return FitStats(len(fit_samples), seconds, peak_memory_bytes() / 1024**3)
 
@@ -449,11 +464,8 @@ def evaluate_fitted(
         "split": {
             "seed": splits.seed,
             "calibration_fraction": splits.calibration_fraction,
-            "counts": {
-                "fit": len(splits.fit),
-                "calibration_normal": len(splits.calibration_normal),
-                "test": len(splits.test),
-            },
+            "counts": splits.to_dict()["counts"],
+            "max_fit_images": splits.max_fit_images,
             "file_list_sha256": splits.to_dict()["file_list_sha256"],
         },
         "threshold": {

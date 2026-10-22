@@ -3,12 +3,14 @@
 Usage (PowerShell):
     python scripts/evaluate_model.py --model classical --category cashew
     python scripts/evaluate_model.py --model gaussian --category cashew --profile dev
+    python scripts/evaluate_model.py --model patchcore --category cashew --profile dev
     python scripts/evaluate_model.py --model gaussian --category cashew --threshold-policy labeled_calibration
 
-`gaussian` loads the artifact written by scripts/fit_model.py (after integrity checks) and never
-refits; its split and thresholds come from the artifact, and an artifact fitted with other
-settings than requested here is rejected as stale. `classical` has no artifact yet and is
-fitted inside this command from the `fit` split only. Test images are used only for scoring.
+`gaussian` and `patchcore` load the artifact written by scripts/fit_model.py (after integrity
+checks) and never refit; their split and thresholds come from the artifact, and an artifact
+fitted with other settings than requested here is rejected as stale. `classical` has no
+artifact yet and is fitted inside this command from the `fit` split only. Test images are
+used only for scoring.
 Output goes to <INSPECTAI_REPORT_DIR>/<model>/<category>/: predictions.csv, summary.json, and
 examples/*.png.
 
@@ -26,6 +28,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from inspectai.artifacts.gaussian_io import load_gaussian
+from inspectai.artifacts.patchcore_io import load_patchcore
 from inspectai.artifacts.store import artifact_dir
 from inspectai.config import PROFILES, SplitConfig, load_paths, resize_mode_for
 from inspectai.data.dataset import SUPPORTED_OBJECTS, VisADataset
@@ -54,6 +57,7 @@ from inspectai.evaluation.thresholds import DEFAULT_QUANTILE, POLICIES
 from inspectai.models.base import AnomalyModel
 from inspectai.models.classical import ClassicalConfig, ClassicalModel
 from inspectai.models.gaussian import gaussian_config_for
+from inspectai.models.patchcore import patchcore_config_for
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
@@ -61,7 +65,7 @@ EXIT_DATA_ERROR = 2
 EXIT_ARTIFACT_ERROR = 3
 EXIT_WEIGHTS_UNAVAILABLE = 4
 
-MODELS = ("classical", "gaussian")
+MODELS = ("classical", "gaussian", "patchcore")
 logger = logging.getLogger("evaluate_model")
 
 
@@ -73,10 +77,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--feature-dim", type=int, default=100, help="gaussian only; must match the fit."
     )
+    parser.add_argument(
+        "--coreset-ratio", type=float, default=0.10, help="patchcore only; must match the fit."
+    )
+    parser.add_argument(
+        "--chunk-size", type=int, default=16384, help="patchcore only; search block size."
+    )
     parser.add_argument("--threshold-policy", choices=POLICIES, default=POLICIES[0])
     parser.add_argument("--quantile", type=float, default=DEFAULT_QUANTILE)
     parser.add_argument("--seed", type=int, default=SplitConfig().seed, help="Split seed.")
-    parser.add_argument("--artifact-dir", type=Path, help="gaussian only.")
+    parser.add_argument("--artifact-dir", type=Path, help="gaussian and patchcore.")
     parser.add_argument(
         "--output-dir", type=Path, help="Default: <INSPECTAI_REPORT_DIR>/<model>/<category>."
     )
@@ -113,9 +123,15 @@ def _evaluate(
         model = ClassicalModel(config)
         return model, run_evaluation(model, "classical", asdict(config), dataset, splits, options)
 
-    requested = gaussian_config_for(args.category, args.profile, args.feature_dim, args.seed)
-    directory = args.artifact_dir or artifact_dir(paths_artifact_dir, "gaussian", args.category)
-    model, artifact = load_gaussian(directory, args.category, requested)
+    directory = args.artifact_dir or artifact_dir(paths_artifact_dir, args.model, args.category)
+    if args.model == "gaussian":
+        requested = gaussian_config_for(args.category, args.profile, args.feature_dim, args.seed)
+        model, artifact = load_gaussian(directory, args.category, requested)
+    else:
+        requested = patchcore_config_for(args.category, args.profile, args.coreset_ratio, args.seed)
+        model, artifact = load_patchcore(
+            directory, args.category, requested, runtime={"chunk_size": args.chunk_size}
+        )
     calibration = Calibration.from_dict(artifact.manifest["calibration"])  # type: ignore[arg-type]
     stored_resolution = artifact.manifest.get("eval_resolution")
     if not isinstance(stored_resolution, int):
@@ -124,7 +140,7 @@ def _evaluate(
     fit_stats = artifact.manifest.get("fit_stats")
     result = evaluate_fitted(
         model,
-        "gaussian",
+        args.model,
         requested.to_dict(),
         dataset,
         artifact.split,
