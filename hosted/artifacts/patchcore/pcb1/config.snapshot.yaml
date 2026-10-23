@@ -1,0 +1,17 @@
+backbone: resnet18
+coreset_ratio: 0.1
+image_size: 224
+layers:
+- layer2
+- layer3
+neighborhood: 3
+projection_dim: 128
+resize_mode: letterbox
+runtime:
+  batch_size: 8
+  chunk_size: 16384
+  max_bank_gb: 4.0
+  max_fit_minutes: 30.0
+  num_threads: 6
+seed: 42
+smoothing_sigma: 4.0

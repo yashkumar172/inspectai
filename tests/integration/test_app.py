@@ -543,3 +543,30 @@ def test_the_hosted_inspect_page_offers_uploads_but_no_local_dataset(hosted_env:
     assert at.selectbox(key="inspect_model").value == "classical"
     assert all(SOURCE_DATASET not in r.options for r in at.radio)
     _no_leaks(at, hosted_env)
+
+
+def test_the_hosted_app_inspects_with_model_c_by_default_and_keeps_model_a_optional(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from inspectai.deployment import export_hosted_bundle
+
+    fake = lambda name, allow_download=None, hub_dir=None: (FakeBackbone(), FAKE_WEIGHTS)
+    monkeypatch.setattr("inspectai.deployment.load_backbone", fake)
+    bundle = tmp_path / "hosted"
+    export_hosted_bundle(world.artifacts, world.reports, bundle, models=("patchcore", "classical"))
+    for name in ("INSPECTAI_DATA_ROOT", "INSPECTAI_ARTIFACT_DIR", "INSPECTAI_REPORT_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("inspectai.config.BUNDLE_ROOT", bundle)
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch"))
+    monkeypatch.setattr("inspectai.artifacts.patchcore_io.load_backbone", lambda name: fake(name))
+
+    at = _page("inspect_page").run()
+    assert not at.exception and not at.error
+    assert at.selectbox(key="inspect_model").value == "patchcore"  # Model C is the primary model
+    assert "A classical" in at.selectbox(key="inspect_model").options  # Model A stays selectable
+    at.file_uploader(key="inspect_upload").upload("photo.png", _png(), "image/png").run()
+    at.button(key="inspect_run").click().run()
+    assert not at.exception and not any("cannot be used" in e.value for e in at.error)
+    assert len(at.metric) == 3 and float(at.metric[0].value) > 0
+    assert "C PatchCore-inspired dev" in _texts(at)
+    _no_leaks(at, bundle)

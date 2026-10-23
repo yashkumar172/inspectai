@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -153,6 +153,25 @@ def load_app_paths(env: Mapping[str, str] | None = None, bundle_root: Path | Non
             "is no bundled 'hosted' folder; see README.md, section 'Environment variables'."
         )
     return Paths(data_root=None, artifact_dir=artifact_dir, report_dir=report_dir)
+
+
+def use_bundled_weights(
+    paths: Paths, env: MutableMapping[str, str] | None = None, bundle_root: Path | None = None
+) -> Path | None:
+    """Point `TORCH_HOME` at the bundled pretrained weights for a dataset-free hosted run.
+
+    Only applies without a dataset (`paths.data_root` is None), when `TORCH_HOME` is not set, and
+    when the bundle holds weights (`hosted/torch_cache/hub/checkpoints`). Returns the folder it
+    set, else None. The weights are still hash-checked against the model manifest when loaded.
+    """
+    target = os.environ if env is None else env
+    home = (BUNDLE_ROOT if bundle_root is None else Path(bundle_root)) / "torch_cache"
+    if paths.data_root is not None or target.get("TORCH_HOME", "").strip():
+        return None
+    if not (home / "hub" / "checkpoints").is_dir():
+        return None
+    target["TORCH_HOME"] = str(home)
+    return home
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,5 @@
+# Dependencies for a hosted (CPU-only) run, for example on Streamlit Community Cloud (Python 3.12).
+# The CPU wheel index keeps pip from pulling the multi-gigabyte CUDA build of PyTorch on Linux.
+# Exact pins used for development are in requirements-lock.txt.
+--extra-index-url https://download.pytorch.org/whl/cpu
+.

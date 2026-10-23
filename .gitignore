@@ -19,8 +19,11 @@ reports/*
 *.safetensors
 # The small precomputed bundle for a hosted run (scripts/export_hosted_bundle.py) is tracked.
 !hosted/artifacts/classical/*/*.safetensors
+!hosted/artifacts/patchcore/*/*.safetensors
 *.pt
 *.pth
+# ... and the ResNet-18 weights the bundled Model C artifacts were fitted with.
+!hosted/torch_cache/hub/checkpoints/resnet18-*.pth
 
 # Dataset archives and extracted dataset folders (safety net; the data lives outside the repo)
 *.tar

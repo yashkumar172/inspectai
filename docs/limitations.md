@@ -63,7 +63,7 @@ claim in the README is read more broadly than the evidence allows.
 
 | Item | Status |
 |---|---|
-| Deployment (SPEC.md Section 15) | **Not attempted.** It is optional; the project has no remote repository, and hosting was not tried. The documented local-only mode is the supported state; a dataset-free hosted bundle (`hosted/`: dashboard results and classical-baseline artifacts only) exists and was verified locally, not on a host. The hosted profile (`dev` profile, 5% coreset, float16 tensors) is not implemented (the store supports float16, the models write float32). |
+| Deployment (SPEC.md Section 15) | **Not attempted.** It is optional; the project has no remote repository, and hosting was not tried. The documented local-only mode is the supported state; a dataset-free hosted bundle (`hosted/`: dashboard results, Model C `dev` artifacts with the ResNet-18 weights, and the classical baseline) exists and was verified locally, not on a host. Model B and the Model C `full` profile are not bundled; a float16 profile is not implemented (the store supports float16, the models write float32). |
 | Visual check of the app in a browser | **Not done.** The browser extension was unavailable in the development environment. The app is tested in-process with Streamlit's `AppTest` against synthetic and real artifacts, and `streamlit run app.py` starts and passes its health check, but the on-screen layout and responsiveness have not been reviewed. |
 | Other five VisA objects | Not run (see above). |
 | Added categories fitted on all images | `candle`, `pcb1`, and `pcb2` were fitted on 400 of ~810 images; fits on all images were not run. |

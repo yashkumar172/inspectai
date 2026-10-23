@@ -106,10 +106,13 @@ comparison refusal, and the app's failure paths ([evaluation.md](evaluation.md),
 
 ## 9. Deployment status
 
-**Not attempted.** Deployment (SPEC.md Section 15) is optional; the project has no remote repository
-and nothing was hosted or tested online. The documented local-only mode (`streamlit run app.py`) is the
-final state. The hosted profile (`dev`, 5% coreset, float16 tensors) is not implemented. No hosted
-deployment is claimed.
+**Prepared, not deployed.** Deployment (SPEC.md Section 15) is optional. A dataset-free hosted bundle
+(`hosted/`, about 408 MB) holds the dashboard results, the Model C `dev` artifacts for all seven
+categories with the ResNet-18 weights they need, and the classical baseline; `requirements.txt` installs
+the CPU-only dependencies. From the bundle alone, Model C reproduced the stored evaluation scores exactly
+on 28 test images (about 0.2 s per image, about 1.1 GB peak memory). Nothing was hosted or tested online,
+so no working hosted deployment is claimed. Model B, the Model C `full` profile, and a float16 profile
+are not bundled.
 
 ## 10. Limitations and potential future improvements
 
@@ -119,7 +122,7 @@ about 45 images are conservative (recall 0.06 to 0.90); localisation is coarse (
 scores are not probabilities; the app's layout was not reviewed in a browser; benchmarks used the
 Balanced power plan; no static type checker or CI. Future work: more and cross-validated calibration
 data, the remaining eight objects and several seeds, a faster coreset or approximate search and a
-float16 bank for hosting, finer feature resolution, and a browser-based UI review before any
+float16 bank for a smaller hosted bundle, finer feature resolution, and a browser-based UI review before any
 deployment.
 
 ## Definition of Done (SPEC.md Section 18)
@@ -149,7 +152,7 @@ deployment.
 | 21 | Repository, virtual environment, dataset, and artifacts are outside OneDrive | Done | `C:\dev\inspectai`, `C:\dev\venvs\inspectai`, `C:\dev\inspectai-data` |
 
 PatchCore-inspired functionality was implemented and evaluated, not deferred. Deployment (optional) was
-not attempted; the unfinished items are listed in [limitations.md](limitations.md).
+prepared locally but not hosted; the unfinished items are listed in [limitations.md](limitations.md).
 
 ## Milestones
 

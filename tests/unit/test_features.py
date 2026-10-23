@@ -162,7 +162,7 @@ def test_cached_weights_are_loaded_frozen_and_hashed(
     reference = torchvision.models.resnet18(weights=None)
     path = tmp_path / "resnet18-local.pth"
     torch.save(reference.state_dict(), path)
-    monkeypatch.setattr(features, "weights_cache_path", lambda name: path)
+    monkeypatch.setattr(features, "weights_cache_path", lambda name, hub_dir=None: path)
     model, info = load_backbone("resnet18")
     assert not model.training and not any(p.requires_grad for p in model.parameters())
     assert info.backbone == "resnet18" and info.identifier == "IMAGENET1K_V1"
@@ -176,3 +176,18 @@ def test_a_real_resnet_yields_the_expected_feature_shapes() -> None:
     extractor = FeatureExtractor(torchvision.models.resnet18(weights=None), ("layer2", "layer3"))
     embedding = extractor.embed(torch.zeros(1, 3, 224, 224))
     assert embedding.shape == (1, 128 + 256, 28, 28)
+
+
+def test_a_hub_dir_overrides_the_torch_home_cache(tmp_path: Path, empty_cache: Path) -> None:
+    hub = tmp_path / "bundled hub"
+    assert weights_cache_path("resnet18", hub) == hub / "checkpoints" / (
+        weights_cache_path("resnet18").name
+    )
+    assert weights_cache_path("resnet18", hub).parent != weights_cache_path("resnet18").parent
+    with pytest.raises(WeightsNotFoundError, match="bundled hub"):
+        load_backbone("resnet18", False, hub)
+    cached = weights_cache_path("resnet18", hub)
+    cached.parent.mkdir(parents=True)
+    cached.write_bytes(b"truncated")
+    with pytest.raises(WeightsNotFoundError, match="corrupted"):  # found there, and hash-checked
+        load_backbone("resnet18", False, hub)

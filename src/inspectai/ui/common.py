@@ -13,7 +13,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from inspectai.config import PROFILES, Paths, load_app_paths
+from inspectai.config import PROFILES, Paths, load_app_paths, use_bundled_weights
 from inspectai.data.dataset import Sample, VisADataset
 from inspectai.errors import (
     ArtifactError,
@@ -55,9 +55,11 @@ class Environment:
 def environment() -> Environment:
     """Read the INSPECTAI_* environment variables."""
     try:
-        return Environment(load_app_paths(), None)
+        paths = load_app_paths()
     except ConfigError:
         return Environment(None, MSG_NOT_CONFIGURED)
+    use_bundled_weights(paths)
+    return Environment(paths, None)
 
 
 def fit_hint(option: ModelOption, category: str) -> str:

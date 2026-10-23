@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from inspectai.config import PreprocessConfig, SplitConfig, load_app_paths, load_paths
+from inspectai.config import (
+    PreprocessConfig,
+    SplitConfig,
+    load_app_paths,
+    load_paths,
+    use_bundled_weights,
+)
 from inspectai.errors import ConfigError
 
 
@@ -146,3 +152,20 @@ def test_dataset_locations_need_a_data_root(tmp_path: Path) -> None:
     paths = load_app_paths({"INSPECTAI_REPORT_DIR": str(tmp_path)}, bundle_root=tmp_path / "x")
     with pytest.raises(ConfigError, match="INSPECTAI_DATA_ROOT"):
         _ = paths.split_csv
+
+
+def test_bundled_weights_are_used_only_for_a_dataset_free_run_without_torch_home(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "torch_cache" / "hub" / "checkpoints").mkdir(parents=True)
+    hosted = load_app_paths({"INSPECTAI_REPORT_DIR": str(tmp_path)}, bundle_root=tmp_path)
+    local = load_app_paths({"INSPECTAI_DATA_ROOT": str(tmp_path)})
+
+    env: dict[str, str] = {}
+    assert use_bundled_weights(local, env, tmp_path) is None and env == {}
+    assert use_bundled_weights(hosted, env, tmp_path) == tmp_path / "torch_cache"
+    assert env == {"TORCH_HOME": str(tmp_path / "torch_cache")}
+
+    own = {"TORCH_HOME": "E:/torch"}
+    assert use_bundled_weights(hosted, own, tmp_path) is None and own == {"TORCH_HOME": "E:/torch"}
+    assert use_bundled_weights(hosted, {}, tmp_path / "no bundle") is None

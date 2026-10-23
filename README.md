@@ -2,7 +2,7 @@
 
 InspectAI finds defective products in photographs, shows where the defect is, and reports how far an image is from normal. It learns **only from normal images** of each product and is evaluated on the VisA benchmark (Amazon, ECCV 2022). Three methods are implemented and compared on identical splits: a classical OpenCV baseline, a Gaussian feature model on frozen pretrained CNN features (PaDiM-inspired), and a PatchCore-inspired nearest-neighbor model. Everything runs on an ordinary Windows CPU, and a Streamlit app serves the saved models. The full specification is in [SPEC.md](SPEC.md).
 
-**Status: all milestones (0-7) are done; read [Limitations](#limitations) before relying on any result.** The project is a research and educational prototype, not a certified quality-control system. Deployment (optional) was not attempted, and the app's on-screen layout was not visually verified in a browser.
+**Status: all milestones (0-7) are done; read [Limitations](#limitations) before relying on any result.** The project is a research and educational prototype, not a certified quality-control system. A dataset-free hosted bundle (Model C as the primary model) is prepared and verified locally but has not been deployed or tested on a host, and the app's on-screen layout was not visually verified in a browser.
 
 ## Key features
 
@@ -601,23 +601,23 @@ The full list is in [docs/limitations.md](docs/limitations.md). The most importa
 - Thresholds come from 45-90 held-out normal images, so they are conservative: few false alarms, but moderate recall (0.06 to 0.90 by model and category). Compare models by AUROC and paired intervals, not by F1.
 - Defect localisation is coarse (pixel IoU 0.00 to 0.30), and small or faint defects are often missed.
 - An anomaly score is not a probability, and scores are only meaningful if the object matches the selected category.
-- Not done: deployment (optional, local-only mode is the final state), a visual browser check of the app, the other five VisA objects, fits of the added categories on all of their fit images, a hosted float16 profile, and benchmarking on the High-performance power plan.
+- Not done: deployment to a host (a verified local hosted bundle exists), a visual browser check of the app, the other five VisA objects, fits of the added categories on all of their fit images, a hosted float16 profile, and benchmarking on the High-performance power plan.
 
 ## Deployment status
 
-Deployment (SPEC.md Section 15) is optional and was **not attempted**: the project has no remote repository and nothing was hosted or tested online, so no hosted deployment is claimed. The supported mode is local: `streamlit run app.py` on the machine that holds the artifacts. The project supports **Python 3.12 only** (`requires-python = ">=3.12,<3.13"`; `.python-version` pins `3.12` for uv and pyenv). Streamlit Community Cloud chooses its Python version in the app's **Advanced settings** at deploy time (its default is newer than 3.12), so select 3.12 there; reboot or redeploy the app after changing it.
+Deployment (SPEC.md Section 15) is optional. A hosted bundle was prepared and verified **locally only**: nothing was hosted or tested online, so no working hosted deployment is claimed. The primary supported mode is local: `streamlit run app.py` on the machine that holds the artifacts. The project supports **Python 3.12 only** (`requires-python = ">=3.12,<3.13"`; `.python-version` pins `3.12` for uv and pyenv). Streamlit Community Cloud chooses its Python version in the app's **Advanced settings** at deploy time (its default is newer than 3.12), so select 3.12 there; reboot or redeploy the app after changing it.
 
 ### Hosted run without the dataset
 
-Neither the dataset nor the pretrained weights are in the repository, so a hosted copy (for example on Streamlit Community Cloud) runs from a small precomputed bundle in the `hosted/` folder (about 38 MB, built from real results by `python scripts/export_hosted_bundle.py --force`). When `INSPECTAI_DATA_ROOT` is not set, the app uses `hosted/artifacts` and `hosted/reports` automatically; if `INSPECTAI_ARTIFACT_DIR` or `INSPECTAI_REPORT_DIR` is set, that one is used instead. The bundle contains:
+Neither the dataset nor a pretrained-weights cache is available on a host, so a hosted copy (for example on Streamlit Community Cloud) runs from a precomputed bundle in the `hosted/` folder (about 408 MB, built from real results by `python scripts/export_hosted_bundle.py --force`; `--models classical` builds the small Model A-only bundle). When `INSPECTAI_DATA_ROOT` is not set, the app uses `hosted/artifacts` and `hosted/reports` automatically and points `TORCH_HOME` at `hosted/torch_cache` (unless `TORCH_HOME` is already set); if `INSPECTAI_ARTIFACT_DIR` or `INSPECTAI_REPORT_DIR` is set, that one is used instead. **Model C (PatchCore-inspired, `dev` profile) is the default inspection model**; Model A stays selectable. `requirements.txt` installs the project with the CPU PyTorch wheels. The bundle contains:
 
 | Included | Not included |
 |---|---|
 | `summary.json` and `predictions.csv` of every evaluated run, the comparison tables, and one comparison figure per category (the evaluation dashboard) | The dataset and its test images (the "choose a test image" option is hidden) |
-| The complete classical-baseline artifact (Model A, about 1.5 MB per category), so uploaded images can be inspected without pretrained weights | The Gaussian and PatchCore artifacts (30 to 190 MB each) and the pretrained weights, so Models B and C are not offered |
-| | Per-run example figures (about 6 MB each) |
+| Model C `dev` artifacts for all seven categories (about 46 MB each, mostly the coreset memory bank) and the ResNet-18 ImageNet weights they were fitted with (44.7 MB, shared; hash-checked against each manifest) | Model B, and the Model C `full` profile (Wide ResNet-50-2 weights are 132 MB and its banks 184 MB, above GitHub's 100 MB file limit) |
+| The complete classical-baseline artifact (Model A, about 1.5 MB per category) | Per-run example figures (about 6 MB each) |
 
-The export copies files byte for byte and refuses to finish unless the copied classical artifacts pass the artifact store's integrity checks and the copied results pass the dashboard's validation. Locally, the app still reads your own `INSPECTAI_*` locations. This was verified locally (all pages and a classical prediction with no `INSPECTAI_*` or `TORCH_HOME` variables set) but **not yet on Streamlit Community Cloud**. Serving Models B and C there would need their artifacts plus the ResNet weights, and a lighter profile (a 5% coreset, float16 tensors), which is not implemented.
+The export copies files byte for byte, checks the weights against the SHA-256 in the manifests, and refuses to finish unless every copied artifact passes the artifact store's integrity checks (Model C is loaded with the bundled weights) and the copied results pass the dashboard's validation. Resource needs, measured locally on CPU: about 0.2 s per image for Model C, about 0.4 s to load an artifact, and a peak of about 1.1 GB of memory after loading all seven categories one after another (one category at a time needs less). Locally, scores computed from the bundle alone (no `INSPECTAI_*` variables, no weights cache) matched the stored evaluation scores exactly for 28 test images across all seven categories. This was **not yet verified on Streamlit Community Cloud**: its memory limit, the install of `requirements.txt`, and the 100 MB-per-file and repository-size limits of the host remain to be checked.
 
 ## Milestone checklist
 

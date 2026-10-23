@@ -61,11 +61,12 @@ def _weights_enum(backbone: str):  # type: ignore[no-untyped-def]
     return getattr(torchvision.models, enum_name)[member]
 
 
-def weights_cache_path(backbone: str) -> Path:
-    """Where torchvision caches the weights file of `backbone`."""
+def weights_cache_path(backbone: str, hub_dir: Path | None = None) -> Path:
+    """Where torchvision caches the weights file of `backbone` (under `hub_dir` if given)."""
     weights = _weights_enum(backbone)
     filename = Path(weights.url).name
-    return Path(torch.hub.get_dir()) / "checkpoints" / filename
+    base = Path(torch.hub.get_dir()) if hub_dir is None else Path(hub_dir)
+    return base / "checkpoints" / filename
 
 
 def _sha256_file(path: Path) -> str:
@@ -87,16 +88,17 @@ def fetch_weights(backbone: str) -> Path:
 
 
 def load_backbone(
-    backbone: str, allow_download: bool | None = None
+    backbone: str, allow_download: bool | None = None, hub_dir: Path | None = None
 ) -> tuple[nn.Module, WeightsInfo]:
     """Load a frozen, pretrained torchvision backbone from the local cache.
 
     Raises WeightsNotFoundError if the weights are not cached (unless downloading is allowed
     through `allow_download=True` or `INSPECTAI_ALLOW_WEIGHT_DOWNLOAD=1`) or the cached file
-    fails its hash check. There is no fallback to random weights.
+    fails its hash check. There is no fallback to random weights. `hub_dir` reads the cache from
+    another torchvision hub folder (one holding `checkpoints/`) instead of `TORCH_HOME`.
     """
     weights = _weights_enum(backbone)
-    path = weights_cache_path(backbone)
+    path = weights_cache_path(backbone, hub_dir)
     if allow_download is None:
         allow_download = os.environ.get(ENV_ALLOW_DOWNLOAD) == "1"
     if not path.is_file():

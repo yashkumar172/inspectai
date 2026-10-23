@@ -1,15 +1,19 @@
 """The hosted-bundle export: only the needed files, byte for byte, and a loadable result."""
 
+import hashlib
+import json
 import shutil
 from pathlib import Path
 
 import pytest
-from make_world import World
+from fake_backbone import FakeBackbone
+from make_world import FAKE_WEIGHTS, World
 
 from inspectai.deployment import export_hosted_bundle
 from inspectai.errors import ArtifactError, ConfigError
 from inspectai.evaluation.dashboard import load_results
 from inspectai.inference.predictor import available_categories, option_by_key
+from inspectai.models.features import WeightsInfo, weights_cache_path
 
 
 def _files(root: Path) -> set[str]:
@@ -103,3 +107,106 @@ def test_a_corrupted_classical_artifact_fails_the_export(world: World, tmp_path:
     tensors.write_bytes(tensors.read_bytes()[:-8] + b"\x00" * 8)
     with pytest.raises(ArtifactError):
         export_hosted_bundle(artifacts, world.reports, tmp_path / "hosted")
+
+
+# ----- Model C and its pretrained weights ---------------------------------------------------
+
+
+@pytest.fixture
+def fake_loader(monkeypatch: pytest.MonkeyPatch) -> list[Path | None]:
+    """Stand in for the pretrained backbone in the export's verification; records `hub_dir`."""
+    seen: list[Path | None] = []
+
+    def fake(name: str, allow_download: bool | None = None, hub_dir: Path | None = None):
+        seen.append(hub_dir)
+        return FakeBackbone(), FAKE_WEIGHTS
+
+    monkeypatch.setattr("inspectai.deployment.load_backbone", fake)
+    monkeypatch.setattr("inspectai.artifacts.patchcore_io.load_backbone", lambda n: fake(n))
+    return seen
+
+
+def test_model_c_artifacts_are_bundled_and_verified_with_the_bundled_weights(
+    world: World, tmp_path: Path, fake_loader: list[Path | None]
+) -> None:
+    summary = export_hosted_bundle(
+        world.artifacts, world.reports, tmp_path / "hosted", models=("patchcore", "classical")
+    )
+    files = _files(tmp_path / "hosted")
+    assert summary.artifact_models == {
+        "patchcore": ("cashew", "pipe_fryum"),
+        "classical": ("cashew", "pipe_fryum"),
+    }
+    assert "artifacts/patchcore/cashew/tensors.safetensors" in files
+    assert not any(f.startswith(("artifacts/gaussian", "artifacts/patchcore-full")) for f in files)
+    assert fake_loader and all(
+        h == tmp_path / "hosted" / "torch_cache" / "hub" for h in fake_loader
+    )
+
+
+def _with_weights_record(world: World, tmp_path: Path, weights: bytes) -> tuple[Path, Path, Path]:
+    """Copies of the artifacts whose Model C manifests name a weights file of a known hash."""
+    artifacts, hub = tmp_path / "artifacts", tmp_path / "hub"
+    shutil.copytree(world.artifacts, artifacts)
+    cached = weights_cache_path("resnet18", hub)
+    cached.parent.mkdir(parents=True)
+    cached.write_bytes(weights)
+    digest = hashlib.sha256(weights).hexdigest()
+    for manifest in artifacts.glob("patchcore/*/manifest.json"):
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["backbone"] = "resnet18"
+        data["weights"] = {"backbone": "resnet18", "identifier": "IMAGENET1K_V1", "sha256": digest}
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+    return artifacts, hub, cached
+
+
+def test_the_weights_are_copied_once_and_checked_against_the_manifest(
+    world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    artifacts, hub, cached = _with_weights_record(world, tmp_path, b"weights")
+    digest = hashlib.sha256(b"weights").hexdigest()
+    monkeypatch.setattr(
+        "inspectai.deployment.load_backbone",
+        lambda name, allow_download=None, hub_dir=None: (
+            FakeBackbone(),
+            WeightsInfo(name, "IMAGENET1K_V1", hashlib.sha256(hub_dir_file(hub_dir)).hexdigest()),
+        ),
+    )
+
+    def hub_dir_file(hub_dir: Path) -> bytes:
+        return weights_cache_path("resnet18", hub_dir).read_bytes()
+
+    monkeypatch.setattr("inspectai.artifacts.patchcore_io.load_backbone", lambda n: None)
+    summary = export_hosted_bundle(
+        artifacts,
+        world.reports,
+        tmp_path / "hosted",
+        models=("patchcore",),
+        weights_hub_dir=hub,
+    )
+    bundled = tmp_path / "hosted" / "torch_cache" / "hub" / "checkpoints" / cached.name
+    assert summary.weights == (cached.name,)
+    assert bundled.read_bytes() == b"weights" and hashlib.sha256(b"weights").hexdigest() == digest
+    assert sum(1 for f in _files(tmp_path / "hosted") if f.endswith(".pth")) == 1
+
+
+def test_weights_that_differ_from_the_manifest_or_are_missing_fail_the_export(
+    world: World, tmp_path: Path, fake_loader: list[Path | None]
+) -> None:
+    artifacts, hub, cached = _with_weights_record(world, tmp_path, b"weights")
+    cached.write_bytes(b"other weights")
+    with pytest.raises(ArtifactError, match="differ"):
+        export_hosted_bundle(
+            artifacts, world.reports, tmp_path / "h1", models=("patchcore",), weights_hub_dir=hub
+        )
+    cached.unlink()
+    with pytest.raises(ConfigError, match="fetch_weights.py"):
+        export_hosted_bundle(
+            artifacts, world.reports, tmp_path / "h2", models=("patchcore",), weights_hub_dir=hub
+        )
+
+
+def test_only_known_models_can_be_bundled(world: World, tmp_path: Path) -> None:
+    for models in (("gaussian",), ()):
+        with pytest.raises(ConfigError, match="subset"):
+            export_hosted_bundle(world.artifacts, world.reports, tmp_path / "h", models=models)
