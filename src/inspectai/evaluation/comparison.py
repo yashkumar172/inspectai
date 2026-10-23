@@ -398,6 +398,7 @@ def build_comparison(
             "evaluation_split": first.summary["metrics"]["evaluation_split"],
             "evaluation_resolution": first.summary["metrics"]["evaluation_resolution"],
             "split_file_list_sha256": first.summary["split"]["file_list_sha256"],
+            "fit_images": _fit_images(first.summary["split"]),
             "runs": [run_record(run) for run in runs],
             "paired_auroc_differences": paired_auroc_differences(runs),
             "not_measured": list((not_measured or {}).get(category, [])),
@@ -439,6 +440,15 @@ def build_comparison(
             "pixel_metrics": "copied from the harness summaries (they need the full anomaly maps)",
         },
     }
+
+
+def _fit_images(split: Mapping) -> dict:
+    """Fit-set size of a run: images in the fit split and images actually used (SPEC 5.5 cap)."""
+    counts = split.get("counts") or {}
+    available = counts.get("fit")
+    cap = split.get("max_fit_images")
+    used = counts.get("fit_used", available) if cap is not None else available
+    return {"available": available, "used": used, "max_fit_images": cap}
 
 
 def _protocol(runs_by_category: Mapping[str, Sequence[Run]]) -> dict:
@@ -566,9 +576,12 @@ def _fmt(value: float | None, digits: int = 3) -> str:
 REPRODUCE_NOTE = r"""
 ## How to reproduce
 
-Replace `<category>` by `cashew`, `pipe_fryum`, `chewinggum`, or `fryum` (PowerShell; the data
-root and the report and artifact folders come from the `INSPECTAI_*` environment variables).
-Fitting and thresholds use only the `fit` and `calibration_normal` splits (seed 42); the test
+Replace `<category>` by `cashew`, `pipe_fryum`, `chewinggum`, `fryum`, `candle`, `pcb1`, or
+`pcb2` (PowerShell; the data root and the report and artifact folders come from the
+`INSPECTAI_*` environment variables). `candle`, `pcb1`, and `pcb2` have about 900 normal
+training images; their runs add `--max-fit-images 400` to every `fit_model.py` command and to
+the classical `evaluate_model.py` command (the other models take the subset from their
+artifact), so all five configurations share one seeded subset. Fitting and thresholds use only the `fit` and `calibration_normal` splits (seed 42); the test
 split is only scored. Every run's exact configuration, split file hashes, weights SHA-256,
 and library versions are in `comparison.json`.
 
@@ -617,6 +630,12 @@ def format_markdown(comparison: Mapping) -> str:
             f"{data['n_normal']} normal and {data['n_anomalous']} anomalous test images; every "
             "model used identical splits and evaluation settings (verified)."
         )
+        fit = data["fit_images"]
+        if fit["max_fit_images"] is not None:
+            verified += (
+                f" Every model was fitted on the same seeded random subset of {fit['used']} of "
+                f"the {fit['available']} fit images (`--max-fit-images`, SPEC.md Section 5.5)."
+            )
         lines += [
             f"## {category}",
             "",

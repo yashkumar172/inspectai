@@ -32,7 +32,7 @@ from inspectai.artifacts.patchcore_io import load_patchcore
 from inspectai.artifacts.store import artifact_dir
 from inspectai.config import PROFILES, SplitConfig, load_paths, resize_mode_for
 from inspectai.data.dataset import SUPPORTED_OBJECTS, VisADataset
-from inspectai.data.splits import make_splits
+from inspectai.data.splits import make_splits, with_max_fit_images
 from inspectai.errors import (
     ArtifactError,
     ConfigError,
@@ -88,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=SplitConfig().seed, help="Split seed.")
     parser.add_argument("--artifact-dir", type=Path, help="gaussian and patchcore.")
     parser.add_argument(
+        "--max-fit-images",
+        type=int,
+        help="classical only: fit on the same seeded subset as the other models of this category "
+        "(gaussian and patchcore use the subset recorded in their artifact).",
+    )
+    parser.add_argument(
         "--output-dir", type=Path, help="Default: <INSPECTAI_REPORT_DIR>/<model>/<category>."
     )
     return parser
@@ -117,8 +123,15 @@ def _evaluate(
     options = EvalOptions(
         threshold_policy=args.threshold_policy, quantile=args.quantile, split_seed=args.seed
     )
+    if args.max_fit_images is not None and args.model != "classical":
+        raise ConfigError(
+            "--max-fit-images applies to the classical model only; gaussian and patchcore "
+            "evaluate the subset recorded in their artifact (set it with fit_model.py)"
+        )
     if args.model == "classical":
         splits = make_splits(dataset.samples, args.category, SplitConfig(seed=args.seed))
+        if args.max_fit_images is not None:
+            splits = with_max_fit_images(splits, args.max_fit_images)
         config = ClassicalConfig(resize_mode=resize_mode_for(args.category))
         model = ClassicalModel(config)
         return model, run_evaluation(model, "classical", asdict(config), dataset, splits, options)

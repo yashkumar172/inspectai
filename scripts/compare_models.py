@@ -35,7 +35,7 @@ from inspectai.artifacts.patchcore_io import load_patchcore
 from inspectai.artifacts.store import artifact_dir
 from inspectai.config import Paths, SplitConfig, load_paths, resize_mode_for
 from inspectai.data.dataset import Sample, VisADataset
-from inspectai.data.splits import make_splits
+from inspectai.data.splits import make_splits, with_max_fit_images
 from inspectai.errors import (
     ArtifactError,
     ConfigError,
@@ -72,7 +72,7 @@ EXIT_DATA_ERROR = 2
 EXIT_ARTIFACT_ERROR = 3
 EXIT_WEIGHTS_UNAVAILABLE = 4
 
-DEFAULT_CATEGORIES = ("cashew", "pipe_fryum", "chewinggum", "fryum")
+DEFAULT_CATEGORIES = ("cashew", "pipe_fryum", "chewinggum", "fryum", "candle", "pcb1", "pcb2")
 N_NORMAL_EXAMPLES = 2
 ANOMALY_SIZE_QUANTILES = (0.15, 0.5, 0.85)
 SCORE_CHECK_TOLERANCE = 1e-3
@@ -189,10 +189,17 @@ def _load_model(
     seed: int,
     feature_dim: int,
     coreset_ratio: float,
+    max_fit_images: int | None = None,
 ) -> AnomalyModel:
-    """The fitted model of a run: loaded from its artifact (classical: refitted, 8 s)."""
+    """The fitted model of a run: loaded from its artifact (classical: refitted, 8 s).
+
+    `max_fit_images` is the cap recorded in the run's summary; the classical refit must use the
+    same subset as the evaluated run.
+    """
     if spec.model == "classical":
         splits = make_splits(dataset.samples, category, SplitConfig(seed=seed))
+        if max_fit_images is not None:
+            splits = with_max_fit_images(splits, max_fit_images)
         model = ClassicalModel(ClassicalConfig(resize_mode=resize_mode_for(category)))
         fit_model(model, dataset, splits)
         return model
@@ -230,7 +237,16 @@ def build_figure(
 
     panels: list[list[ModelPanel]] = [[] for _ in chosen]
     for run in runs:
-        model = _load_model(run.spec, category, paths, dataset, seed, feature_dim, coreset_ratio)
+        model = _load_model(
+            run.spec,
+            category,
+            paths,
+            dataset,
+            seed,
+            feature_dim,
+            coreset_ratio,
+            run.summary["split"].get("max_fit_images"),
+        )
         reported = {r["image"]: r["score"] for r in run.predictions}
         threshold = float(run.summary["threshold"]["image"]["value"])
         predictions = [model.predict(image) for image in images]

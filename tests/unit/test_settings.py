@@ -45,7 +45,15 @@ def test_the_default_file_exists_loads_and_is_cpu_only() -> None:
     assert DEFAULT_CONFIG_PATH.is_file()
     config = load_default_config(env=ENV)
     assert config.device == "cpu" and config.seed == 42
-    assert config.categories == ("cashew", "pipe_fryum", "chewinggum", "fryum")
+    assert config.categories == (
+        "cashew",
+        "pipe_fryum",
+        "chewinggum",
+        "fryum",
+        "candle",
+        "pcb1",
+        "pcb2",
+    )
     assert config.unresolved == ()
 
 

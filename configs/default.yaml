@@ -15,8 +15,10 @@ paths:
 device: cpu   # CPU only; any other value is rejected (GPU execution is a non-goal)
 seed: 42
 
-# The initial categories of SPEC.md Section 3.2 (all 12 VisA objects are supported by the loader).
-categories: [cashew, pipe_fryum, chewinggum, fryum]
+# The initial categories of SPEC.md Section 3.2, then candle, pcb1, and pcb2 (about 900 normal
+# training images each, so benchmarked with `--max-fit-images 400`). All 12 VisA objects are
+# supported by the loader.
+categories: [cashew, pipe_fryum, chewinggum, fryum, candle, pcb1, pcb2]
 
 splits:                      # SPEC.md Section 3.5
   seed: 42

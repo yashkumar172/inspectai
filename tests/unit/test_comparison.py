@@ -234,6 +234,25 @@ def test_the_comparison_has_per_category_tables_paired_differences_and_macro_ave
     assert "B Gaussian full" not in comparison["macro_average"]
 
 
+def test_a_capped_fit_set_is_stated_and_an_uncapped_one_is_not() -> None:
+    uncapped = build_comparison({"cashew": _runs("cashew")})
+    assert uncapped["categories"]["cashew"]["fit_images"]["max_fit_images"] is None
+    assert "fit images" not in format_markdown(uncapped)
+
+    runs = _runs("candle")
+    for run in runs:
+        run.summary["split"].update(
+            max_fit_images=400, counts={"fit": 855, "fit_used": 400, "test": 200}
+        )
+    capped = build_comparison({"candle": runs})
+    assert capped["categories"]["candle"]["fit_images"] == {
+        "available": 855,
+        "used": 400,
+        "max_fit_images": 400,
+    }
+    assert "subset of 400 of the 855 fit images" in format_markdown(capped)
+
+
 def test_macro_average_is_the_mean_over_categories() -> None:
     runs = {c: _runs(c) for c in ("cashew", "pipe_fryum")}
     runs["pipe_fryum"][1] = make_run(GAUSSIAN, "pipe_fryum", _scores(1.0, 9))

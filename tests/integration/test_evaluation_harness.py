@@ -166,6 +166,24 @@ def test_the_command_writes_csv_json_and_example_figures(cli: ModuleType, env: P
     assert len(list((out / "examples").glob("*.png"))) == 4
 
 
+def test_the_classical_command_can_fit_on_a_recorded_subset(cli: ModuleType, env: Path) -> None:
+    assert cli.main(["--model", "classical", "--category", "cashew", "--max-fit-images", "3"]) == 0
+    summary = json.loads((env / "classical" / "cashew" / "summary.json").read_text("utf-8"))
+    assert summary["split"]["max_fit_images"] == 3
+    assert summary["split"]["counts"]["fit_used"] == 3
+    assert summary["split"]["counts"]["fit"] > 3
+    assert summary["performance"]["n_fit_images"] == 3
+
+
+def test_a_fit_subset_is_rejected_for_models_that_load_an_artifact(
+    cli: ModuleType, env: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for model in ("gaussian", "patchcore"):
+        args = ["--model", model, "--category", "cashew", "--max-fit-images", "3"]
+        assert cli.main(args) == 2
+        assert "classical model only" in capsys.readouterr().err
+
+
 def test_the_command_accepts_labeled_calibration(cli: ModuleType, env: Path) -> None:
     args = ["--model", "classical", "--category", "pipe_fryum", "--threshold-policy"]
     assert cli.main([*args, "labeled_calibration"]) == 0

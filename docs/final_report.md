@@ -163,3 +163,18 @@ not attempted; the unfinished items are listed in [limitations.md](limitations.m
 | 5 | verified comparison reports, paired differences, four categories |
 | 6 | Streamlit app, upload validation, validated dashboard, baseline artifact |
 | 7 | smoke test, default-settings file, documentation, clean-copy verification, this report |
+
+## Addendum: `candle`, `pcb1`, `pcb2`
+
+After Milestone 7 the benchmark was extended to three more VisA objects with the same models and
+protocol (no tuning). The tables above describe the original four categories and are unchanged; the
+seven-category results, the macro averages, and the paired differences are in the README ("Results by
+category") and in the regenerated `comparison.md`. Differences from the original four: these objects
+have about 810 fit images, so all five configurations were fitted on the same seeded subset of 400
+(`--max-fit-images 400`); the test sets have 100 normal and 100 anomalous images; and the classical
+baseline is not clearly worse than the deep models on `pcb2`, where it has the highest image AUROC
+(0.919). Five objects remain unevaluated.
+
+Test status after this extension (counted, not estimated): 603 default tests passed (9 deselected)
+and 9 real-dataset/real-weights tests passed; the 600 quoted in Section 6 belong to the Milestone 7
+snapshot. Ruff check and format are clean.
