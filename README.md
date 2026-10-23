@@ -605,7 +605,7 @@ The full list is in [docs/limitations.md](docs/limitations.md). The most importa
 
 ## Deployment status
 
-Deployment (SPEC.md Section 15) is optional and was **not attempted**: the project has no remote repository and nothing was hosted or tested online, so no hosted deployment is claimed. The supported mode is local: `streamlit run app.py` on the machine that holds the artifacts. A hosted deployment would need the lightweight profile (`dev`, a 5% coreset, float16 tensors), which is not implemented, and the model artifacts supplied separately, since neither the dataset nor the weights are in the repository.
+Deployment (SPEC.md Section 15) is optional and was **not attempted**: the project has no remote repository and nothing was hosted or tested online, so no hosted deployment is claimed. The supported mode is local: `streamlit run app.py` on the machine that holds the artifacts. The project supports **Python 3.12 only** (`requires-python = ">=3.12,<3.13"`; `.python-version` pins `3.12` for uv and pyenv). Streamlit Community Cloud chooses its Python version in the app's **Advanced settings** at deploy time (its default is newer than 3.12), so select 3.12 there; reboot or redeploy the app after changing it. A hosted deployment would need the lightweight profile (`dev`, a 5% coreset, float16 tensors), which is not implemented, and the model artifacts supplied separately, since neither the dataset nor the weights are in the repository.
 
 ## Milestone checklist
 
