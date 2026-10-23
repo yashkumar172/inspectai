@@ -499,6 +499,34 @@ def test_the_app_configuration_enforces_the_spec_limits() -> None:
     assert config["client"]["showErrorDetails"] == "none"  # no stack traces for users
 
 
+def test_the_file_watcher_is_off_so_it_cannot_evict_modules_during_an_import() -> None:
+    """Regression: `KeyError: 'inspectai.ui'` on Streamlit Cloud (the watcher removed the package
+    from sys.modules while a session was importing one of its pages)."""
+    import tomllib
+
+    from streamlit.watcher.path_watcher import NoOpPathWatcher, get_path_watcher_class
+
+    config = tomllib.loads((REPO / ".streamlit" / "config.toml").read_text(encoding="utf-8"))
+    assert get_path_watcher_class(config["server"]["fileWatcherType"]) is NoOpPathWatcher
+
+
+def test_the_app_imports_in_a_fresh_interpreter() -> None:
+    import subprocess
+    import sys
+
+    source = (REPO / "app.py").read_text(encoding="utf-8").splitlines()
+    line = next(x for x in source if x.startswith("from inspectai.ui import"))
+    done = subprocess.run(
+        [sys.executable, "-I", "-c", line],
+        capture_output=True,
+        text=True,
+        cwd=REPO,
+        timeout=120,
+        check=False,
+    )
+    assert done.returncode == 0, done.stderr[-500:]
+
+
 # ----- hosted run: bundled files, no dataset, no INSPECTAI_* variables -------------------------
 
 

@@ -3,6 +3,10 @@
 maxUploadSize = 10
 # Listen on this computer only by default; a hosted deployment overrides this explicitly.
 address = "localhost"
+# No hot reload. Streamlit's file watcher evicts watched modules from sys.modules between runs; if
+# that happens while another session is importing inspectai.ui.* the import fails with
+# KeyError: 'inspectai.ui'. A deployed copy only changes through a redeploy, so nothing is watched.
+fileWatcherType = "none"
 
 [browser]
 # No usage statistics or other unnecessary external calls.

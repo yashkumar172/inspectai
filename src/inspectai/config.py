@@ -15,7 +15,20 @@ ENV_REPORT_DIR = "INSPECTAI_REPORT_DIR"
 
 # Precomputed artifacts and reports that ship with the repository for a hosted, dataset-free run
 # (built by scripts/export_hosted_bundle.py). The app falls back to them when no location is set.
-BUNDLE_ROOT = Path(__file__).resolve().parents[2] / "hosted"
+
+
+def find_bundle_root(package_file: Path | str = __file__, cwd: Path | None = None) -> Path:
+    """The `hosted/` folder next to `src/` (a source checkout), else the working directory's.
+
+    A regular `pip install .` copies the package into site-packages, where the folder next to
+    `src/` does not exist; a hosted run starts in the repository root, so `./hosted` is used then.
+    """
+    beside_src = Path(package_file).resolve().parents[2] / "hosted"
+    in_cwd = (Path.cwd() if cwd is None else Path(cwd)) / "hosted"
+    return in_cwd if not beside_src.is_dir() and in_cwd.is_dir() else beside_src
+
+
+BUNDLE_ROOT = find_bundle_root()
 
 RESIZE_MODES = ("stretch", "letterbox")
 DEFAULT_MAX_SIDE = 4096

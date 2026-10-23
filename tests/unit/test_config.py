@@ -7,6 +7,7 @@ import pytest
 from inspectai.config import (
     PreprocessConfig,
     SplitConfig,
+    find_bundle_root,
     load_app_paths,
     load_paths,
     use_bundled_weights,
@@ -169,3 +170,21 @@ def test_bundled_weights_are_used_only_for_a_dataset_free_run_without_torch_home
     own = {"TORCH_HOME": "E:/torch"}
     assert use_bundled_weights(hosted, own, tmp_path) is None and own == {"TORCH_HOME": "E:/torch"}
     assert use_bundled_weights(hosted, {}, tmp_path / "no bundle") is None
+
+
+def test_the_bundle_is_found_when_the_package_is_installed_outside_the_checkout(
+    tmp_path: Path,
+) -> None:
+    checkout = tmp_path / "repo"
+    (checkout / "src" / "inspectai").mkdir(parents=True)
+    installed = tmp_path / "venv" / "lib" / "python3.12" / "site-packages" / "inspectai"
+    installed.mkdir(parents=True)
+    (checkout / "hosted").mkdir()
+
+    source_file = checkout / "src" / "inspectai" / "config.py"
+    site_file = installed / "config.py"
+    assert find_bundle_root(source_file, tmp_path) == checkout / "hosted"
+    assert find_bundle_root(site_file, checkout) == checkout / "hosted"  # cwd is the repository
+    assert (
+        find_bundle_root(site_file, tmp_path) == tmp_path / "venv" / "lib" / "python3.12" / "hosted"
+    )
