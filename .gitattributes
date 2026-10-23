@@ -1,0 +1,8 @@
+# Normalize text files to LF in the repository; check out with the platform's native endings.
+* text=auto
+
+# Binary files: never convert or diff as text.
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.safetensors binary

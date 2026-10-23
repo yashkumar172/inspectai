@@ -630,6 +630,10 @@ Deployment (SPEC.md Section 15) is optional and was **not attempted**: the proje
 - **The app cannot find any model or result:** check that `INSPECTAI_DATA_ROOT`, `INSPECTAI_ARTIFACT_DIR`, and `INSPECTAI_REPORT_DIR` are set in the terminal that runs `streamlit run app.py`.
 - **`ArtifactError` (exit code 3):** the artifact is missing, corrupted, or stale. Run `scripts/fit_model.py` again with the same settings you evaluate with.
 
+## License
+
+The InspectAI source code and documentation are released under the [MIT License](LICENSE). The license does not cover the VisA dataset, which is not part of this repository and keeps its own license (below).
+
 ## Dataset attribution and licensing
 
 VisA is released under CC BY 4.0. Cite: Zou, Jeong, Pemula, Zhang, and Dabeer, "SPot-the-Difference Self-Supervised Pre-training for Anomaly Detection and Segmentation", ECCV 2022 (arXiv:2207.14315). See SPEC.md Section 3.1 for the attribution rules that apply to figures derived from the dataset.

@@ -83,5 +83,5 @@ claim in the README is read more broadly than the evidence allows.
   search was kept for clarity and correctness, as SPEC.md asks), and the float16 bank for hosting.
 - **Finer localisation:** higher-resolution feature maps or multi-scale scoring.
 - **Deployment:** a hosted demo with the lightweight profile, after a browser-based UI review.
-- **Engineering:** a type checker and CI, a `.gitattributes` for line endings, and loading the
+- **Engineering:** a type checker and CI, and loading the
   classical artifact in `evaluate_model.py`.
