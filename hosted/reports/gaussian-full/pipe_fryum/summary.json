@@ -1,0 +1,144 @@
+{
+ "model": "gaussian",
+ "category": "pipe_fryum",
+ "created_utc": "2026-10-22T17:17:42+00:00",
+ "model_config": {
+  "backbone": "wide_resnet50_2",
+  "layers": [
+   "layer2",
+   "layer3"
+  ],
+  "image_size": 224,
+  "resize_mode": "letterbox",
+  "d": 100,
+  "epsilon": 0.01,
+  "smoothing_sigma": 4.0,
+  "seed": 42,
+  "batch_size": 8,
+  "num_threads": 6
+ },
+ "options": {
+  "threshold_policy": "normal_percentile",
+  "quantile": 0.99,
+  "eval_resolution": 256,
+  "split_seed": 42,
+  "bootstrap_resamples": 1000,
+  "bootstrap_seed": 42
+ },
+ "split": {
+  "seed": 42,
+  "calibration_fraction": 0.1,
+  "counts": {
+   "fit": 405,
+   "calibration_normal": 45,
+   "test": 150
+  },
+  "file_list_sha256": {
+   "fit": "fc7ace9671507f03b10aa216712e914439f779dd82cb867481ba759e414ddab3",
+   "calibration_normal": "a81bbd9336175316a7a1e1030f61f43a6137223ca53df3bfc4df6a722eb9b74c",
+   "test": "5c2eeca043522ebe8b61592eaeb08897e19eda7017d0d88658a316350030920d"
+  }
+ },
+ "threshold": {
+  "image": {
+   "policy": "normal_percentile",
+   "value": 7.956732044219971,
+   "params": {
+    "q": 0.99,
+    "n_calibration_values": 45
+   }
+  },
+  "pixel": {
+   "policy": "normal_percentile",
+   "value": 5.009157977104187,
+   "params": {
+    "q": 0.99,
+    "n_calibration_values": 2949120
+   }
+  }
+ },
+ "calibration_scores": {
+  "min": 4.210010051727295,
+  "median": 5.234262943267822,
+  "max": 8.149664878845215
+ },
+ "metrics": {
+  "evaluation_split": "test",
+  "evaluation_resolution": 256,
+  "image": {
+   "n_normal": 50,
+   "n_anomalous": 100,
+   "auroc": 0.9316,
+   "auroc_ci95": [
+    0.882238,
+    0.973123
+   ],
+   "average_precision": 0.959973,
+   "threshold": 7.956732044219971,
+   "confusion_matrix": {
+    "tp": 57,
+    "fp": 4,
+    "tn": 46,
+    "fn": 43
+   },
+   "precision": 0.934426,
+   "recall": 0.57,
+   "f1": 0.708075,
+   "false_positive_rate": 0.08,
+   "false_negative_rate": 0.43
+  },
+  "pixel": {
+   "auroc": 0.993653,
+   "average_precision": 0.701098,
+   "threshold": 5.009157977104187,
+   "iou": 0.243283,
+   "dice": 0.391355
+  }
+ },
+ "performance": {
+  "n_fit_images": 405,
+  "fit_seconds": 52.354,
+  "peak_memory_gb_after_fit": 0.98,
+  "environment": {
+   "python": "3.12.2",
+   "platform": "Windows-11-10.0.26200-SP0",
+   "processor": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD",
+   "physical_cores": 6,
+   "logical_cores": 12,
+   "ram_total_gb": 15.3,
+   "opencv_threads": 12,
+   "power_plan": "Balanced",
+   "plugged_in": true,
+   "numpy": "2.5.2",
+   "opencv": "5.0.0",
+   "scikit_learn": "1.9.1",
+   "pillow": "12.3.0",
+   "psutil": "7.2.2"
+  },
+  "n_timed_images": 150,
+  "latency_seconds_mean": 0.1299,
+  "latency_seconds_median": 0.1235,
+  "latency_seconds_max": 0.4682,
+  "images_per_second": 7.7,
+  "latency_note": "model.predict only; image decoding and metrics are excluded",
+  "peak_memory_gb_after_scoring": 0.88
+ },
+ "environment": {
+  "python": "3.12.2",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "processor": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD",
+  "physical_cores": 6,
+  "logical_cores": 12,
+  "ram_total_gb": 15.3,
+  "opencv_threads": 12,
+  "power_plan": "Balanced",
+  "plugged_in": true,
+  "numpy": "2.5.2",
+  "opencv": "5.0.0",
+  "scikit_learn": "1.9.1",
+  "pillow": "12.3.0",
+  "psutil": "7.2.2"
+ },
+ "schema_version": 1,
+ "undefined_metrics": []
+}

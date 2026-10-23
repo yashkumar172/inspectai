@@ -13,6 +13,10 @@ ENV_DATA_ROOT = "INSPECTAI_DATA_ROOT"
 ENV_ARTIFACT_DIR = "INSPECTAI_ARTIFACT_DIR"
 ENV_REPORT_DIR = "INSPECTAI_REPORT_DIR"
 
+# Precomputed artifacts and reports that ship with the repository for a hosted, dataset-free run
+# (built by scripts/export_hosted_bundle.py). The app falls back to them when no location is set.
+BUNDLE_ROOT = Path(__file__).resolve().parents[2] / "hosted"
+
 RESIZE_MODES = ("stretch", "letterbox")
 DEFAULT_MAX_SIDE = 4096
 DEFAULT_MAX_PIXELS = DEFAULT_MAX_SIDE * DEFAULT_MAX_SIDE
@@ -75,14 +79,24 @@ def profile_settings(name: str) -> dict[str, object]:
 
 @dataclass(frozen=True)
 class Paths:
-    """Machine-specific locations, supplied through environment variables."""
+    """Machine-specific locations, supplied through environment variables.
 
-    data_root: Path
+    `data_root` is None for a hosted run that only has precomputed artifacts and reports; the
+    dataset locations are then unavailable (`has_dataset` is False).
+    """
+
+    data_root: Path | None
     artifact_dir: Path
     report_dir: Path
 
     @property
+    def has_dataset(self) -> bool:
+        return self.data_root is not None
+
+    @property
     def visa_root(self) -> Path:
+        if self.data_root is None:
+            raise ConfigError("No dataset location is configured (INSPECTAI_DATA_ROOT is not set).")
         return self.data_root / "visa"
 
     @property
@@ -115,6 +129,30 @@ def load_paths(env: Mapping[str, str] | None = None) -> Paths:
         artifact_dir=Path(artifact_raw).expanduser() if artifact_raw else data_root / "artifacts",
         report_dir=Path(report_raw).expanduser() if report_raw else data_root / "reports",
     )
+
+
+def load_app_paths(env: Mapping[str, str] | None = None, bundle_root: Path | None = None) -> Paths:
+    """The locations the Streamlit app uses; the dataset is optional.
+
+    With `INSPECTAI_DATA_ROOT` set this is exactly `load_paths`. Without it, the app still runs
+    from precomputed files: an explicitly set artifact or report directory is used as given, and
+    a directory that is not set falls back to the bundled `hosted/` folder if it exists. If
+    neither is available, a `ConfigError` is raised.
+    """
+    source = os.environ if env is None else env
+    if source.get(ENV_DATA_ROOT, "").strip():
+        return load_paths(source)
+    bundle = BUNDLE_ROOT if bundle_root is None else Path(bundle_root)
+    artifact_raw = source.get(ENV_ARTIFACT_DIR, "").strip()
+    report_raw = source.get(ENV_REPORT_DIR, "").strip()
+    artifact_dir = Path(artifact_raw).expanduser() if artifact_raw else bundle / "artifacts"
+    report_dir = Path(report_raw).expanduser() if report_raw else bundle / "reports"
+    if not (artifact_raw or report_raw) and not (artifact_dir.is_dir() or report_dir.is_dir()):
+        raise ConfigError(
+            f"None of {ENV_DATA_ROOT}, {ENV_ARTIFACT_DIR}, or {ENV_REPORT_DIR} is set and there "
+            "is no bundled 'hosted' folder; see README.md, section 'Environment variables'."
+        )
+    return Paths(data_root=None, artifact_dir=artifact_dir, report_dir=report_dir)
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,120 @@
+{
+ "model": "classical",
+ "category": "pipe_fryum",
+ "created_utc": "2026-10-22T18:47:21+00:00",
+ "model_config": {
+  "image_size": 256,
+  "resize_mode": "letterbox",
+  "smoothing_sigma": 4.0,
+  "std_floor": 5.0
+ },
+ "options": {
+  "threshold_policy": "normal_percentile",
+  "quantile": 0.99,
+  "eval_resolution": 256,
+  "split_seed": 42,
+  "bootstrap_resamples": 1000,
+  "bootstrap_seed": 42
+ },
+ "split": {
+  "seed": 42,
+  "calibration_fraction": 0.1,
+  "counts": {
+   "fit": 405,
+   "calibration_normal": 45,
+   "test": 150
+  },
+  "max_fit_images": null,
+  "file_list_sha256": {
+   "fit": "fc7ace9671507f03b10aa216712e914439f779dd82cb867481ba759e414ddab3",
+   "calibration_normal": "a81bbd9336175316a7a1e1030f61f43a6137223ca53df3bfc4df6a722eb9b74c",
+   "test": "5c2eeca043522ebe8b61592eaeb08897e19eda7017d0d88658a316350030920d"
+  }
+ },
+ "threshold": {
+  "image": {
+   "policy": "normal_percentile",
+   "value": 10.203578147888198,
+   "params": {
+    "q": 0.99,
+    "n_calibration_values": 45
+   }
+  },
+  "pixel": {
+   "policy": "normal_percentile",
+   "value": 1.577466928958894,
+   "params": {
+    "q": 0.99,
+    "n_calibration_values": 2949120
+   }
+  }
+ },
+ "calibration_scores": {
+  "min": 0.7575945854187012,
+  "median": 1.864114761352539,
+  "max": 12.887136459350586
+ },
+ "metrics": {
+  "evaluation_split": "test",
+  "evaluation_resolution": 256,
+  "image": {
+   "n_normal": 50,
+   "n_anomalous": 100,
+   "auroc": 0.674,
+   "auroc_ci95": [
+    0.586728,
+    0.75924
+   ],
+   "average_precision": 0.818348,
+   "threshold": 10.203578147888198,
+   "confusion_matrix": {
+    "tp": 8,
+    "fp": 0,
+    "tn": 50,
+    "fn": 92
+   },
+   "precision": 1.0,
+   "recall": 0.08,
+   "f1": 0.148148,
+   "false_positive_rate": 0.0,
+   "false_negative_rate": 0.92
+  },
+  "pixel": {
+   "auroc": 0.963041,
+   "average_precision": 0.456976,
+   "threshold": 1.577466928958894,
+   "iou": 0.243211,
+   "dice": 0.391263
+  }
+ },
+ "performance": {
+  "n_fit_images": 405,
+  "fit_seconds": 7.155,
+  "peak_memory_gb_after_fit": 0.4,
+  "n_timed_images": 150,
+  "latency_seconds_mean": 0.0135,
+  "latency_seconds_median": 0.0135,
+  "latency_seconds_max": 0.0175,
+  "images_per_second": 73.93,
+  "latency_note": "model.predict only; image decoding and metrics are excluded",
+  "peak_memory_gb_after_scoring": 0.46
+ },
+ "environment": {
+  "python": "3.12.2",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "processor": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD",
+  "physical_cores": 6,
+  "logical_cores": 12,
+  "ram_total_gb": 15.3,
+  "opencv_threads": 12,
+  "power_plan": "Balanced",
+  "plugged_in": true,
+  "numpy": "2.5.2",
+  "opencv": "5.0.0",
+  "scikit_learn": "1.9.1",
+  "pillow": "12.3.0",
+  "psutil": "7.2.2"
+ },
+ "schema_version": 1,
+ "undefined_metrics": []
+}

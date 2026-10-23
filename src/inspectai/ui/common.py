@@ -13,7 +13,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from inspectai.config import PROFILES, Paths, load_paths
+from inspectai.config import PROFILES, Paths, load_app_paths
 from inspectai.data.dataset import Sample, VisADataset
 from inspectai.errors import (
     ArtifactError,
@@ -28,8 +28,9 @@ from inspectai.inference.predictor import ModelOption, Predictor, load_predictor
 logger = logging.getLogger("inspectai.app")
 
 MSG_NOT_CONFIGURED = (
-    "The data location is not configured. Set the INSPECTAI_DATA_ROOT, INSPECTAI_ARTIFACT_DIR, "
-    "and INSPECTAI_REPORT_DIR environment variables (see the README) and restart the app."
+    "The data location is not configured. Set the INSPECTAI_ARTIFACT_DIR and INSPECTAI_REPORT_DIR "
+    "environment variables (and INSPECTAI_DATA_ROOT to use the local dataset; see the README), or "
+    "provide the bundled `hosted` folder, and restart the app."
 )
 MSG_INTEGRITY = (
     "The saved model failed its integrity checks and was not loaded. Fit it again with "
@@ -54,7 +55,7 @@ class Environment:
 def environment() -> Environment:
     """Read the INSPECTAI_* environment variables."""
     try:
-        return Environment(load_paths(), None)
+        return Environment(load_app_paths(), None)
     except ConfigError:
         return Environment(None, MSG_NOT_CONFIGURED)
 
@@ -127,6 +128,8 @@ def _cached_dataset(split_csv: str, images_root: str) -> VisADataset | None:
 
 def get_dataset(paths: Paths) -> VisADataset | None:
     """The local VisA dataset if its split file and image folder exist, else None."""
+    if not paths.has_dataset:
+        return None
     if not paths.split_csv.is_file() or not paths.visa_images_root.is_dir():
         return None
     return _cached_dataset(str(paths.split_csv), str(paths.visa_images_root))

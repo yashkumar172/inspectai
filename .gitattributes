@@ -6,3 +6,6 @@
 *.jpeg binary
 *.png binary
 *.safetensors binary
+
+# The hosted bundle holds hashed artifacts: never rewrite line endings in it.
+hosted/** -text

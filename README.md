@@ -605,7 +605,19 @@ The full list is in [docs/limitations.md](docs/limitations.md). The most importa
 
 ## Deployment status
 
-Deployment (SPEC.md Section 15) is optional and was **not attempted**: the project has no remote repository and nothing was hosted or tested online, so no hosted deployment is claimed. The supported mode is local: `streamlit run app.py` on the machine that holds the artifacts. The project supports **Python 3.12 only** (`requires-python = ">=3.12,<3.13"`; `.python-version` pins `3.12` for uv and pyenv). Streamlit Community Cloud chooses its Python version in the app's **Advanced settings** at deploy time (its default is newer than 3.12), so select 3.12 there; reboot or redeploy the app after changing it. A hosted deployment would need the lightweight profile (`dev`, a 5% coreset, float16 tensors), which is not implemented, and the model artifacts supplied separately, since neither the dataset nor the weights are in the repository.
+Deployment (SPEC.md Section 15) is optional and was **not attempted**: the project has no remote repository and nothing was hosted or tested online, so no hosted deployment is claimed. The supported mode is local: `streamlit run app.py` on the machine that holds the artifacts. The project supports **Python 3.12 only** (`requires-python = ">=3.12,<3.13"`; `.python-version` pins `3.12` for uv and pyenv). Streamlit Community Cloud chooses its Python version in the app's **Advanced settings** at deploy time (its default is newer than 3.12), so select 3.12 there; reboot or redeploy the app after changing it.
+
+### Hosted run without the dataset
+
+Neither the dataset nor the pretrained weights are in the repository, so a hosted copy (for example on Streamlit Community Cloud) runs from a small precomputed bundle in the `hosted/` folder (about 38 MB, built from real results by `python scripts/export_hosted_bundle.py --force`). When `INSPECTAI_DATA_ROOT` is not set, the app uses `hosted/artifacts` and `hosted/reports` automatically; if `INSPECTAI_ARTIFACT_DIR` or `INSPECTAI_REPORT_DIR` is set, that one is used instead. The bundle contains:
+
+| Included | Not included |
+|---|---|
+| `summary.json` and `predictions.csv` of every evaluated run, the comparison tables, and one comparison figure per category (the evaluation dashboard) | The dataset and its test images (the "choose a test image" option is hidden) |
+| The complete classical-baseline artifact (Model A, about 1.5 MB per category), so uploaded images can be inspected without pretrained weights | The Gaussian and PatchCore artifacts (30 to 190 MB each) and the pretrained weights, so Models B and C are not offered |
+| | Per-run example figures (about 6 MB each) |
+
+The export copies files byte for byte and refuses to finish unless the copied classical artifacts pass the artifact store's integrity checks and the copied results pass the dashboard's validation. Locally, the app still reads your own `INSPECTAI_*` locations. This was verified locally (all pages and a classical prediction with no `INSPECTAI_*` or `TORCH_HOME` variables set) but **not yet on Streamlit Community Cloud**. Serving Models B and C there would need their artifacts plus the ResNet weights, and a lighter profile (a 5% coreset, float16 tensors), which is not implemented.
 
 ## Milestone checklist
 

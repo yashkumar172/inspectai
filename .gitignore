@@ -17,6 +17,8 @@ reports/*
 !artifacts/README.md
 !reports/README.md
 *.safetensors
+# The small precomputed bundle for a hosted run (scripts/export_hosted_bundle.py) is tracked.
+!hosted/artifacts/classical/*/*.safetensors
 *.pt
 *.pth
 

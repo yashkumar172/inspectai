@@ -1,0 +1,122 @@
+{
+ "model": "classical",
+ "category": "pcb2",
+ "created_utc": "2026-10-23T00:34:50+00:00",
+ "model_config": {
+  "image_size": 256,
+  "resize_mode": "letterbox",
+  "smoothing_sigma": 4.0,
+  "std_floor": 5.0
+ },
+ "options": {
+  "threshold_policy": "normal_percentile",
+  "quantile": 0.99,
+  "eval_resolution": 256,
+  "split_seed": 42,
+  "bootstrap_resamples": 1000,
+  "bootstrap_seed": 42
+ },
+ "split": {
+  "seed": 42,
+  "calibration_fraction": 0.1,
+  "counts": {
+   "fit": 811,
+   "calibration_normal": 90,
+   "test": 200,
+   "fit_used": 400
+  },
+  "max_fit_images": 400,
+  "file_list_sha256": {
+   "fit": "e759110f4c1dad022460af659d228401b0b996a75fb4bb88730478fda8c2cce8",
+   "calibration_normal": "1defa29bc20f2520ba7b1c10db70d47afcf2738c69e0477d9ac6c54772a8e62d",
+   "test": "0d0fa27707ad0d3ecbacb6eb71e9fc5077375c7510d69a193cac3669e14ebfb1",
+   "fit_used": "5077235f157d5b910193b9403c02f35fd5fbbbb88735f7c044a044c746c95df2"
+  }
+ },
+ "threshold": {
+  "image": {
+   "policy": "normal_percentile",
+   "value": 4.214379181861877,
+   "params": {
+    "q": 0.99,
+    "n_calibration_values": 90
+   }
+  },
+  "pixel": {
+   "policy": "normal_percentile",
+   "value": 1.6459559035301219,
+   "params": {
+    "q": 0.99,
+    "n_calibration_values": 5898240
+   }
+  }
+ },
+ "calibration_scores": {
+  "min": 1.0503467321395874,
+  "median": 1.6308435201644897,
+  "max": 5.162176609039307
+ },
+ "metrics": {
+  "evaluation_split": "test",
+  "evaluation_resolution": 256,
+  "image": {
+   "n_normal": 100,
+   "n_anomalous": 100,
+   "auroc": 0.9194,
+   "auroc_ci95": [
+    0.87508,
+    0.954636
+   ],
+   "average_precision": 0.905196,
+   "threshold": 4.214379181861877,
+   "confusion_matrix": {
+    "tp": 25,
+    "fp": 2,
+    "tn": 98,
+    "fn": 75
+   },
+   "precision": 0.925926,
+   "recall": 0.25,
+   "f1": 0.393701,
+   "false_positive_rate": 0.02,
+   "false_negative_rate": 0.75
+  },
+  "pixel": {
+   "auroc": 0.696044,
+   "average_precision": 0.003399,
+   "threshold": 1.6459559035301219,
+   "iou": 0.003457,
+   "dice": 0.006891
+  }
+ },
+ "performance": {
+  "n_fit_images": 400,
+  "fit_seconds": 7.729,
+  "peak_memory_gb_after_fit": 0.4,
+  "n_timed_images": 200,
+  "latency_seconds_mean": 0.0132,
+  "latency_seconds_median": 0.0132,
+  "latency_seconds_max": 0.0141,
+  "images_per_second": 75.71,
+  "latency_note": "model.predict only; image decoding and metrics are excluded",
+  "peak_memory_gb_after_scoring": 0.52
+ },
+ "environment": {
+  "python": "3.12.2",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "processor": "AMD64 Family 23 Model 104 Stepping 1, AuthenticAMD",
+  "physical_cores": 6,
+  "logical_cores": 12,
+  "ram_total_gb": 15.3,
+  "opencv_threads": 12,
+  "power_plan": "Balanced",
+  "plugged_in": true,
+  "numpy": "2.5.2",
+  "opencv": "5.0.0",
+  "scikit_learn": "1.9.1",
+  "pillow": "12.3.0",
+  "psutil": "7.2.2"
+ },
+ "schema_version": 1,
+ "undefined_metrics": []
+}

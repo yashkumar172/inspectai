@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from inspectai.config import PreprocessConfig, SplitConfig, load_paths
+from inspectai.config import PreprocessConfig, SplitConfig, load_app_paths, load_paths
 from inspectai.errors import ConfigError
 
 
@@ -111,3 +111,38 @@ def test_preprocess_config_rejects_a_bad_max_side() -> None:
     with pytest.raises(ConfigError):
         PreprocessConfig(max_side=0)
     assert PreprocessConfig().max_side == 4096
+
+
+def test_app_paths_with_a_data_root_match_load_paths() -> None:
+    env = {"INSPECTAI_DATA_ROOT": "D:/data", "INSPECTAI_REPORT_DIR": "F:/out"}
+    assert load_app_paths(env) == load_paths(env)
+    assert load_app_paths(env).has_dataset
+
+
+def test_app_paths_without_a_data_root_use_the_explicit_directories(tmp_path: Path) -> None:
+    paths = load_app_paths(
+        {"INSPECTAI_ARTIFACT_DIR": "E:/models", "INSPECTAI_REPORT_DIR": "F:/out"},
+        bundle_root=tmp_path / "missing",
+    )
+    assert paths.data_root is None and not paths.has_dataset
+    assert (paths.artifact_dir, paths.report_dir) == (Path("E:/models"), Path("F:/out"))
+
+
+def test_app_paths_fall_back_to_the_bundled_folder(tmp_path: Path) -> None:
+    (tmp_path / "artifacts").mkdir()
+    paths = load_app_paths({}, bundle_root=tmp_path)
+    assert paths.artifact_dir == tmp_path / "artifacts"
+    assert paths.report_dir == tmp_path / "reports"
+    mixed = load_app_paths({"INSPECTAI_REPORT_DIR": "F:/out"}, bundle_root=tmp_path)
+    assert mixed.artifact_dir == tmp_path / "artifacts" and mixed.report_dir == Path("F:/out")
+
+
+def test_app_paths_without_any_source_are_a_config_error(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="hosted"):
+        load_app_paths({}, bundle_root=tmp_path / "nothing")
+
+
+def test_dataset_locations_need_a_data_root(tmp_path: Path) -> None:
+    paths = load_app_paths({"INSPECTAI_REPORT_DIR": str(tmp_path)}, bundle_root=tmp_path / "x")
+    with pytest.raises(ConfigError, match="INSPECTAI_DATA_ROOT"):
+        _ = paths.split_csv

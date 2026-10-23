@@ -1,0 +1,4 @@
+image_size: 256
+resize_mode: letterbox
+smoothing_sigma: 4.0
+std_floor: 5.0

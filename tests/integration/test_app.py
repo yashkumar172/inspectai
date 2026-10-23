@@ -211,10 +211,11 @@ def test_an_unfitted_model_or_category_says_model_unavailable_and_shows_no_resul
 
 
 def test_the_inspect_page_without_configuration_is_unavailable(
-    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for name in ("INSPECTAI_DATA_ROOT", "INSPECTAI_ARTIFACT_DIR", "INSPECTAI_REPORT_DIR"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("inspectai.config.BUNDLE_ROOT", tmp_path / "no hosted folder")
     at = _page("inspect_page").run()
     assert not at.exception and any(MSG_NOT_CONFIGURED in e.value for e in at.error)
     assert not at.metric
@@ -496,3 +497,49 @@ def test_the_app_configuration_enforces_the_spec_limits() -> None:
     assert config["server"]["address"] == "localhost"  # not exposed to the network by default
     assert config["browser"]["gatherUsageStats"] is False  # no unnecessary external calls
     assert config["client"]["showErrorDetails"] == "none"  # no stack traces for users
+
+
+# ----- hosted run: bundled files, no dataset, no INSPECTAI_* variables -------------------------
+
+
+@pytest.fixture
+def hosted_env(world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A bundle exported from the shared world, used as the only source of files."""
+    from inspectai.deployment import export_hosted_bundle
+
+    bundle = tmp_path / "hosted"
+    export_hosted_bundle(world.artifacts, world.reports, bundle)
+    for name in ("INSPECTAI_DATA_ROOT", "INSPECTAI_ARTIFACT_DIR", "INSPECTAI_REPORT_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("inspectai.config.BUNDLE_ROOT", bundle)
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch"))  # empty: no weights available
+    return bundle
+
+
+def test_the_hosted_home_page_lists_only_the_bundled_classical_models(hosted_env: Path) -> None:
+    at = _page("home").run()
+    assert not at.exception and not any(MSG_NOT_CONFIGURED in w.value for w in at.warning)
+    rows = at.dataframe[0].value
+    fitted = dict(zip(rows["Model"], rows["Categories with a fitted model"], strict=True))
+    assert fitted["A classical"] == "cashew, pipe_fryum"
+    assert fitted["B Gaussian dev"] == "none" and fitted["C PatchCore-inspired dev"] == "none"
+    _no_leaks(at, hosted_env)
+
+
+def test_the_hosted_dashboard_shows_the_exported_results_without_a_dataset(
+    hosted_env: Path,
+) -> None:
+    at = _page("dashboard_page").run()
+    assert not at.exception and not at.error
+    text = _texts(at)
+    assert "Model comparison" in text and "5 normal and 5 anomalous" in text
+    assert len(at.dataframe[0].value) >= 1
+    _no_leaks(at, hosted_env)
+
+
+def test_the_hosted_inspect_page_offers_uploads_but_no_local_dataset(hosted_env: Path) -> None:
+    at = _page("inspect_page").run()
+    assert not at.exception and not at.error
+    assert at.selectbox(key="inspect_model").value == "classical"
+    assert all(SOURCE_DATASET not in r.options for r in at.radio)
+    _no_leaks(at, hosted_env)
