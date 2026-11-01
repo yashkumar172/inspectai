@@ -13,7 +13,12 @@ from inspectai.evaluation.thresholds import DEFAULT_QUANTILE, NORMAL_PERCENTILE
 from inspectai.inference.uploads import ASPECT_TOLERANCE, MAX_UPLOAD_BYTES, MIN_SIDE
 from inspectai.models.classical import ClassicalConfig
 from inspectai.models.gaussian import GaussianConfig
-from inspectai.models.patchcore import PatchCoreConfig
+from inspectai.models.patchcore import DEFAULT_INDEX_BACKEND, PatchCoreConfig
+from inspectai.models.refine import (
+    DEFAULT_GUIDED_EPS,
+    DEFAULT_GUIDED_RADIUS,
+    DEFAULT_REFINEMENT,
+)
 from inspectai.settings import (
     DEFAULT_CONFIG_PATH,
     expand_environment,
@@ -109,12 +114,24 @@ def test_every_value_in_the_file_equals_the_default_in_the_code() -> None:
     gaussian = {**GaussianConfig().to_dict(), "batch_size": 8, "num_threads": 6}
     for key in ("backbone", "layers", "image_size", "resize_mode"):
         gaussian.pop(key)  # these come from the profile and the category
-    assert raw["gaussian"] == gaussian
+    # the file spells out the settings that are omitted from a default model's snapshot
+    refinement = {
+        "refinement_filter": DEFAULT_REFINEMENT,
+        "guided_radius": DEFAULT_GUIDED_RADIUS,
+        "guided_eps": DEFAULT_GUIDED_EPS,
+        "multiscale": False,
+    }
+    assert raw["gaussian"] == {**gaussian, **refinement}
 
     patchcore = {**PatchCoreConfig().to_dict(), **PatchCoreConfig().runtime_dict()}
     for key in ("backbone", "layers", "image_size", "resize_mode"):
         patchcore.pop(key)
-    assert raw["patchcore"] == {**patchcore, "max_fit_images": None}
+    assert raw["patchcore"] == {
+        **patchcore,
+        **refinement,
+        "max_fit_images": None,
+        "index_backend": DEFAULT_INDEX_BACKEND,
+    }
 
     assert raw["app"] == {
         "max_upload_mb": MAX_UPLOAD_BYTES / 1024**2,
@@ -225,3 +242,23 @@ def test_a_valid_override_is_accepted(tmp_path: Path) -> None:
     raw["patchcore"]["max_fit_images"] = 200
     config = load_default_config(_write(tmp_path, raw), ENV)
     assert config.patchcore.coreset_ratio == 0.05 and config.max_fit_images == 200
+
+
+def test_the_multiscale_switch_adds_layer1_with_a_grid_layer_and_rejects_non_booleans(
+    tmp_path: Path,
+) -> None:
+    data = _raw()
+    data["patchcore"]["multiscale"] = True
+    data["gaussian"]["refinement_filter"] = "guided"
+    config = load_default_config(_write(tmp_path, data), env=ENV)
+    assert config.patchcore.layers == ("layer1", "layer2", "layer3")
+    assert config.patchcore.grid_layer == "layer2"
+    assert config.gaussian.layers == ("layer2", "layer3") and config.gaussian.grid_layer is None
+    assert config.gaussian.refinement_filter == "guided"
+    data["patchcore"]["multiscale"] = "yes"
+    with pytest.raises(ConfigError, match="multiscale"):
+        load_default_config(_write(tmp_path, data), env=ENV)
+    data["patchcore"]["multiscale"] = False
+    data["patchcore"]["index_backend"] = "hnsw"
+    with pytest.raises(ConfigError, match="index_backend"):
+        load_default_config(_write(tmp_path, data), env=ENV)

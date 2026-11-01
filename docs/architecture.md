@@ -62,7 +62,9 @@ training images again. The one deliberate exception is the classical baseline, w
 | `models/classical.py` | Model A |
 | `models/features.py` | Frozen torchvision backbone, weight loading, feature extraction |
 | `models/gaussian.py` | Model B |
-| `models/patchcore.py` | Model C, greedy coreset, exact nearest-neighbor search |
+| `models/patchcore.py` | Model C, greedy coreset (scan and pruned), exact nearest-neighbor search (cdist and tiled) |
+| `models/refine.py` | Anomaly-map smoothing: Gaussian (default) or guided filter |
+| `models/quantize.py` | Optional INT8 backbone (dynamic, static) for inference |
 | `artifacts/store.py` | Artifact format, integrity checks, stale-artifact detection |
 | `artifacts/*_io.py` | Model-specific save / load on top of the store |
 | `evaluation/metrics.py` | Image and pixel metrics, bootstrap intervals, paired bootstrap |
@@ -75,6 +77,7 @@ training images again. The one deliberate exception is the classical baseline, w
 | `inference/predictor.py` | Model registry, loading, single-image inspection, downloads |
 | `visualization/` | Heatmaps, overlays, panels, comparison figures |
 | `ui/` | The four Streamlit pages and their shared helpers |
+| `scripts/benchmark_latency.py` | Latency percentiles, memory, and INT8 variants (see [benchmarks.md](benchmarks.md)) |
 
 Each module has one responsibility and its own tests (`tests/unit`, `tests/integration`).
 
@@ -94,7 +97,10 @@ standard deviation.
 with torchvision's `create_feature_extractor`. The backbone is frozen (`eval()`, no gradients) and
 used only for inference under `torch.inference_mode()`. It returns the `layer2` and `layer3`
 feature maps; `layer3` is upsampled bilinearly to the `layer2` resolution and the two are
-concatenated along channels. At 224x224 input this gives a 28x28 grid of 784 positions:
+concatenated along channels. At 224x224 input this gives a 28x28 grid of 784 positions. An optional `multiscale` setting adds
+`layer1` (64 channels for `resnet18`) and average-pools it to that same 28x28 grid, so the patch
+count stays 784 and D grows from 384 to 448; `grid_layer` records which layer defines the grid
+(a model fitted with it is a different model and needs its own artifact folder):
 
 | Profile | Backbone | Channels (layer2 + layer3) |
 |---|---|---|
@@ -164,10 +170,35 @@ means, inverse covariances, and the selected channel indices are stored (about 3
    chunked `torch.cdist` (no approximate index). The 28x28 distance grid becomes the anomaly map
    exactly as in Model B.
 
-The selection dominates the fit time (about 11 minutes per category on the reference CPU); the stored
-bank is 49 MB (`dev`) or 195 MB (`full`).
+The selection dominates the fit time (about 11 minutes per category on the reference CPU with the
+default `exact` backend); the stored bank is 49 MB (`dev`) or 195 MB (`full`).
+
+Both steps have two interchangeable exact kernels, chosen by `index_backend` (a resource setting
+under `runtime`, so it never makes an artifact stale):
+
+- `exact`: the greedy loop keeps a running vector `nearest[i]` (squared distance of vector i to its
+  closest selected vector) and, per step, folds in the new center with one pass over all N projected
+  vectors. That pass is memory-bandwidth bound (it streams the whole 162 MB projected matrix every
+  step), so chunking it does not help. Search uses chunked `torch.cdist`.
+- `tiled`: each vector remembers its owning center `o`. A new center `c` can be closer to `x` than
+  `o` only if `d(c, o) < 2 d(x, o)` (triangle inequality), so only the few percent of vectors passing
+  that test are re-measured; the test needs the distances from `c` to the selected centers
+  (`k x 128` per step, not `N x 128`). It selects exactly the same indices (verified at full scale)
+  and is about 3.5 times faster (see [benchmarks.md](benchmarks.md)). Search uses `addmm` tiles of
+  `-2 q.b + |b|^2` and agrees with `exact` to float32 rounding.
+
+Approximate indexes (HNSW) are deliberately not offered: they would add a dependency and make the
+scores depend on index construction.
 
 ## 9. Anomaly map and image score
+
+The coarse 28x28 score grid is upsampled bilinearly to the model input size and then smoothed. The
+default is a Gaussian (sigma 4), which is isotropic and blurs the boundary of a small defect into
+its surroundings. `refinement_filter: guided` uses a guided filter instead: a local linear model
+`q = a * I + b` per window, with `I` the luminance of the preprocessed input, evaluated with box
+filters (radius 8, regularization 0.01 on a [0, 1] guide, both fixed in advance and stored in the
+artifact). In flat image regions it averages like a box filter; at an image edge it follows the
+edge. Thresholds are calibrated with whichever filter the model uses.
 
 All three models return a `Prediction`: a float32 map with the input image's height and width and an
 image score equal to the **maximum of the map**. A score is a distance-like number, not a
@@ -215,7 +246,11 @@ before any model code runs. Loaded models and validated result data are cached w
 in the artifact. Failures are mapped to fixed, path-free messages (`Model unavailable` with the
 command that fixes it); technical details go to the server log only. The dashboard reads the same
 report files as the comparison and shows a category only after its results pass the same
-verification.
+verification. Its error-analysis section lists a model's false positives and false negatives from the
+saved `predictions.csv` (decision rule `score > threshold`, most clear-cut first). Choosing one shows
+the score, threshold, ground truth, and, when the local dataset is available, the original image, the
+model's overlay, and the ground-truth mask; only images that the split file lists are opened, and a
+hosted run without the dataset shows the scores alone.
 
 ## 13. Error handling and exit codes
 
@@ -231,6 +266,13 @@ exit codes:
 | 1 | any other failure (logged with its traceback) |
 
 ## 14. Resource handling and determinism
+
+Memory bounds: the unreduced bank estimate (`images x patches x D x 4 bytes`) is still checked
+against `max_bank_gb` before fitting; `multiscale` raises D by the `layer1` channels (448 instead of
+384 for `resnet18`). The `tiled` coreset adds a `n_select x 128` float32 matrix of selected centers
+(16 MB for 31,752 selections) and one int64 per candidate (2.5 MB); the measured peak working set of
+the selection was 1.05 GB for both backends. INT8 variants load a second copy of the backbone, so
+their peak working set is higher (see [benchmarks.md](benchmarks.md)).
 
 Inference runs on the CPU with `torch.set_num_threads` set explicitly (default 6, the physical core
 count). Fitting is streaming or bounded: Model B uses constant memory, Model C estimates and caps its

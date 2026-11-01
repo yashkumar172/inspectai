@@ -93,6 +93,25 @@ def _section(data: Mapping[str, object], name: str) -> dict[str, object]:
     return dict(section)
 
 
+def _with_multiscale(
+    section: dict[str, object], profile_values: dict[str, object], name: str
+) -> dict[str, object]:
+    """Apply the documented `multiscale` switch: add layer1, pooled to the first layer's grid.
+
+    Removes `multiscale` from `section` (it is not a model field) and returns the profile values,
+    with `layer1` prepended when the switch is on (the model then gets `grid_layer`).
+    """
+    switch = section.pop("multiscale", False)
+    if not isinstance(switch, bool):
+        raise ConfigError(f"configs/default.yaml: {name}.multiscale must be true or false")
+    values = dict(profile_values)
+    if switch:
+        layers = tuple(profile_values["layers"])  # type: ignore[arg-type]
+        values["layers"] = ("layer1", *layers)
+        section["grid_layer"] = layers[0]
+    return values
+
+
 def _build(name: str, factory, **values: object):  # type: ignore[no-untyped-def]
     try:
         return factory(**values)
@@ -178,7 +197,10 @@ def load_default_config(
         **evaluation,
     )
 
+    gaussian_values = _section(data, "gaussian")
+    gaussian_profile = _with_multiscale(gaussian_values, profile_values, "gaussian")
     patchcore_values = _section(data, "patchcore")
+    patchcore_profile = _with_multiscale(patchcore_values, profile_values, "patchcore")
     max_fit_images = patchcore_values.pop("max_fit_images", None)
     if max_fit_images is not None and (
         isinstance(max_fit_images, bool)
@@ -203,8 +225,8 @@ def load_default_config(
         resize_modes={str(k): str(v) for k, v in resize_modes.items()},
         evaluation=options,
         classical=_build("classical", ClassicalConfig, **_section(data, "classical")),
-        gaussian=_build("gaussian", GaussianConfig, **profile_values, **_section(data, "gaussian")),
-        patchcore=_build("patchcore", PatchCoreConfig, **profile_values, **patchcore_values),
+        gaussian=_build("gaussian", GaussianConfig, **gaussian_profile, **gaussian_values),
+        patchcore=_build("patchcore", PatchCoreConfig, **patchcore_profile, **patchcore_values),
         max_fit_images=max_fit_images,
         app={k: float(v) for k, v in app.items()},
     )

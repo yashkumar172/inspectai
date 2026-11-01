@@ -24,7 +24,6 @@ import statistics
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass
 
-import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -33,7 +32,20 @@ from numpy.typing import NDArray
 from inspectai.config import RESIZE_MODES, profile_settings, resize_mode_for
 from inspectai.errors import ModelError
 from inspectai.models.base import Prediction
-from inspectai.models.features import FeatureExtractor, WeightsInfo, images_to_batch
+from inspectai.models.features import (
+    Embedder,
+    FeatureExtractor,
+    WeightsInfo,
+    images_to_batch,
+)
+from inspectai.models.refine import (
+    DEFAULT_GUIDED_EPS,
+    DEFAULT_GUIDED_RADIUS,
+    DEFAULT_REFINEMENT,
+    luminance_guide,
+    refine_map,
+    validate_refinement,
+)
 from inspectai.preprocessing.images import ImageArray, map_back
 
 logger = logging.getLogger(__name__)
@@ -53,8 +65,15 @@ class GaussianConfig:
     seed: int = 42
     batch_size: int = 8
     num_threads: int = 6
+    refinement_filter: str = DEFAULT_REFINEMENT
+    guided_radius: int = DEFAULT_GUIDED_RADIUS
+    guided_eps: float = DEFAULT_GUIDED_EPS
+    grid_layer: str | None = None
 
     def __post_init__(self) -> None:
+        validate_refinement(self.refinement_filter, self.guided_radius, self.guided_eps)
+        if self.grid_layer is not None and self.grid_layer not in self.layers:
+            raise ModelError(f"grid_layer {self.grid_layer!r} is not in layers {self.layers}")
         if self.image_size < 8:
             raise ModelError(f"image_size must be at least 8, got {self.image_size}")
         if self.resize_mode not in RESIZE_MODES:
@@ -71,6 +90,12 @@ class GaussianConfig:
     def to_dict(self) -> dict[str, object]:
         data = asdict(self)
         data["layers"] = list(self.layers)
+        # Added settings appear only when they differ from the defaults (older artifacts stay valid).
+        if self.grid_layer is None:
+            del data["grid_layer"]
+        if self.refinement_filter == DEFAULT_REFINEMENT:
+            for key in ("refinement_filter", "guided_radius", "guided_eps"):
+                del data[key]
         return data
 
     @classmethod
@@ -84,7 +109,14 @@ class GaussianConfig:
 
 
 def gaussian_config_for(
-    category: str, profile: str = "dev", d: int = 100, seed: int = 42
+    category: str,
+    profile: str = "dev",
+    d: int = 100,
+    seed: int = 42,
+    multiscale: bool = False,
+    refinement_filter: str = DEFAULT_REFINEMENT,
+    guided_radius: int = DEFAULT_GUIDED_RADIUS,
+    guided_eps: float = DEFAULT_GUIDED_EPS,
 ) -> GaussianConfig:
     """The configuration of a category under a profile (`dev` or `full`).
 
@@ -92,13 +124,21 @@ def gaussian_config_for(
     settings is recognized as stale.
     """
     settings = profile_settings(profile)
+    layers = tuple(settings["layers"])  # type: ignore[arg-type]
+    grid_layer = None
+    if multiscale:  # layer1, average-pooled to the layer2 grid
+        layers, grid_layer = ("layer1", *layers), layers[0]
     return GaussianConfig(
         backbone=str(settings["backbone"]),
-        layers=tuple(settings["layers"]),  # type: ignore[arg-type]
+        layers=layers,
         image_size=int(settings["image_size"]),  # type: ignore[call-overload]
         resize_mode=resize_mode_for(category),
         d=d,
         seed=seed,
+        refinement_filter=refinement_filter,
+        guided_radius=guided_radius,
+        guided_eps=guided_eps,
+        grid_layer=grid_layer,
     )
 
 
@@ -129,6 +169,10 @@ class GaussianModel:
         self._channel_index: torch.Tensor | None = None
         self._mean: torch.Tensor | None = None
         self._inv_cov: torch.Tensor | None = None
+
+    def use_extractor(self, extractor: Embedder) -> None:
+        """Replace the feature extractor, e.g. by an INT8 one (the fitted tensors are untouched)."""
+        self._extractor = extractor  # type: ignore[assignment]
 
     # ----- fitting -------------------------------------------------------------------------
 
@@ -214,10 +258,15 @@ class GaussianModel:
         upsampled = F.interpolate(
             grid, size=(cfg.image_size, cfg.image_size), mode="bilinear", align_corners=False
         )[0, 0].numpy()
-        if cfg.smoothing_sigma > 0:
-            upsampled = cv2.GaussianBlur(
-                upsampled, (0, 0), cfg.smoothing_sigma, borderType=cv2.BORDER_REFLECT
-            )
+        guide = luminance_guide(batch[0]) if cfg.refinement_filter == "guided" else None
+        upsampled = refine_map(
+            upsampled,
+            guide,
+            cfg.refinement_filter,
+            cfg.smoothing_sigma,
+            cfg.guided_radius,
+            cfg.guided_eps,
+        )
         anomaly_map = map_back(upsampled.astype(np.float32), infos[0])
         return Prediction(score=float(anomaly_map.max()), anomaly_map=anomaly_map)
 

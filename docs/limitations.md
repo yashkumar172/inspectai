@@ -37,7 +37,10 @@ claim in the README is read more broadly than the evidence allows.
   (on `fryum` the baseline's F1 exceeds Model B `dev`'s although Model B ranks images better). Compare
   models by AUROC and paired intervals, not by F1.
 - **Defect localisation is coarse.** Maps come from a 28x28 feature grid upsampled to the image
-  size; pixel IoU is 0.05 to 0.30 for every model. Small, faint, or low-contrast defects are often
+  size; pixel IoU is 0.02 to 0.30 for every model (0.02 to 0.10 on `candle`, `pcb1`, `pcb2`). An
+  edge-aware guided filter and extra `layer1` features were tried on those three categories and did
+  not raise IoU / Dice (see [benchmarks.md](benchmarks.md)); the limit is the grid and the
+  conservative pixel threshold, not the smoothing. Small, faint, or low-contrast defects are often
   missed, and heatmaps indicate regions, not exact outlines.
 - **Scores are not probabilities and not comparable across models or categories.** The app states
   this next to every result. A score for an object of the wrong category is meaningless.
@@ -74,6 +77,10 @@ claim in the README is read more broadly than the evidence allows.
 | Static type checking and CI | Public functions are annotated, but no type checker is configured (the code carries `# type: ignore` comments for untyped JSON access), and there is no continuous-integration configuration. |
 
 ## 4. Possible future work
+
+- **INT8:** static INT8 was measured on cashew only, with PyTorch's deprecated eager-mode API; it
+  costs Model C 0.048 AUROC and gives it no speedup. A float32 bank with INT8 queries is the mismatch;
+  quantizing the bank too, or a higher-resolution grid, are untested.
 
 - **Better thresholds:** more calibration images per category, cross-validated quantiles, or a
   separately evaluated calibration step (isotonic regression) so scores could responsibly be shown as

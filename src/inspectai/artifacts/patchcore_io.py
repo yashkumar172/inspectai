@@ -122,7 +122,7 @@ def load_patchcore(
         model = PatchCoreModel.from_tensors(
             config,
             artifact.tensors,
-            FeatureExtractor(backbone, config.layers),
+            FeatureExtractor(backbone, config.layers, config.grid_layer),
             weights,
             feature_map_shape,
             None if aspect is None else float(aspect),  # type: ignore[arg-type]

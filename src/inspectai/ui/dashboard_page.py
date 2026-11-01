@@ -8,15 +8,37 @@ splits and settings. Invalid results are reported as such, with no metrics.
 
 from __future__ import annotations
 
+import logging
+
 import streamlit as st
 
+from inspectai.config import Paths
+from inspectai.errors import InspectAIError
 from inspectai.evaluation.dashboard import (
+    FALSE_NEGATIVE,
+    FALSE_POSITIVE,
     CategoryResults,
     confusion_matrix,
     metric_rows,
+    misclassified_images,
     performance_rows,
 )
-from inspectai.ui.common import VISA_ATTRIBUTION, dashboard_results, environment
+from inspectai.inference.predictor import inspect_image, option_by_key
+from inspectai.ui.common import (
+    MSG_INFERENCE_FAILED,
+    VISA_ATTRIBUTION,
+    dashboard_results,
+    environment,
+    get_dataset,
+    load_model,
+)
+
+logger = logging.getLogger("inspectai.app")
+
+KIND_LABELS = {
+    FALSE_POSITIVE: "False positives (normal images scored above the threshold)",
+    FALSE_NEGATIVE: "False negatives (anomalous images scored at or below the threshold)",
+}
 
 NO_RESULTS = (
     "No evaluation results were found, so there are no metrics to show. Evaluate a model first, "
@@ -42,11 +64,11 @@ def render() -> None:
         format_func=lambda c: c if results[c].valid else f"{c} (results not valid)",
         key="dashboard_category",
     )
-    _category(results[category])
+    _category(results[category], env.paths)
     st.caption(VISA_ATTRIBUTION)
 
 
-def _category(result: CategoryResults) -> None:
+def _category(result: CategoryResults, paths: Paths) -> None:
     if not result.valid:
         st.error(
             f"The results for {result.category} did not pass validation and are not shown. "
@@ -131,6 +153,8 @@ def _category(result: CategoryResults) -> None:
         f"({record['threshold']['image']['policy'].replace('_', ' ')})."
     )
 
+    _error_analysis(result, paths)
+
     st.subheader("Inference performance")
     st.dataframe(performance_rows(result), hide_index=True, width="stretch")
     st.caption(
@@ -142,3 +166,100 @@ def _category(result: CategoryResults) -> None:
         st.subheader("Representative predictions")
         for example in result.examples:
             st.image(str(example.path), caption=example.caption, width="stretch")
+
+
+def _error_analysis(result: CategoryResults, paths: Paths) -> None:
+    """Triage the mistakes of one model: the scores always, the images when the dataset is here."""
+    st.subheader("Error analysis")
+    labels = [r["label"] for r in result.records]
+    model_label = st.selectbox("Model", labels, key="dashboard_error_model")
+    run = result.runs[labels.index(model_label)]
+    errors = misclassified_images(run)
+    st.caption(
+        f"At the stored threshold, {model_label} made {len(errors[FALSE_POSITIVE])} false "
+        f"positives and {len(errors[FALSE_NEGATIVE])} false negatives among "
+        f"{len(run.predictions)} evaluated images. Read from the saved per-image predictions."
+    )
+    kind = st.radio(
+        "Mistakes to inspect",
+        list(KIND_LABELS),
+        format_func=KIND_LABELS.__getitem__,
+        key="dashboard_error_kind",
+    )
+    rows = errors[kind]
+    if not rows:
+        st.success("This model made no mistakes of this kind on these images.")
+        return
+    st.dataframe(
+        [
+            {
+                "Image": r["name"],
+                "Score": round(r["score"], 3),
+                "Threshold": round(r["threshold"], 3),
+                "Score / threshold": round(r["ratio"], 2),
+                "Ground truth": "anomalous" if r["label"] else "normal",
+            }
+            for r in rows
+        ],
+        hide_index=True,
+        width="stretch",
+    )
+    index = st.selectbox(
+        "Look at one image",
+        list(range(len(rows))),
+        format_func=lambda i: f"{rows[i]['name']} (score {rows[i]['score']:.3f})",
+        key="dashboard_error_sample",
+    )
+    _show_mistake(result.category, run.spec.report_folder, rows[index], paths)
+
+
+def _show_mistake(category: str, option_key: str, row: dict, paths: Paths) -> None:
+    truth = "anomalous" if row["label"] else "normal"
+    decision = "Anomaly detected" if row["score"] > row["threshold"] else "Normal"
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Anomaly score", f"{row['score']:.3f}")
+    c2.metric("Calibrated threshold", f"{row['threshold']:.3f}")
+    c3.metric("Ground truth", truth)
+    c4.metric("Model decision", decision)
+
+    dataset = get_dataset(paths)
+    if dataset is None:
+        st.info(
+            "The dataset images are not part of this deployment, so only the saved scores can "
+            "be shown. Run the app with INSPECTAI_DATA_ROOT set to see the image and overlay."
+        )
+        return
+    try:
+        # only images the split file lists are ever opened, never a path taken from the report
+        sample = next(s for s in dataset.get_samples(category) if s.image_rel == row["image"])
+    except (StopIteration, InspectAIError):
+        st.warning("This image is not listed in the local dataset.")
+        return
+    outcome = load_model(paths, option_by_key(option_key), category)
+    if outcome.predictor is None:
+        st.warning(outcome.message)
+        return
+    try:
+        image = dataset.load_image(sample)
+        mask = dataset.load_mask(sample, image.shape[:2]) if sample.is_anomalous else None
+        inspection = inspect_image(outcome.predictor, image)
+    except (InspectAIError, ValueError, RuntimeError):
+        logger.exception("The error-analysis image could not be processed")
+        st.error(MSG_INFERENCE_FAILED)
+        return
+    a, b, c = st.columns(3)
+    a.image(image, caption="Original image", width="stretch")
+    b.image(inspection.overlay, caption="Anomaly overlay", width="stretch")
+    if mask is not None:
+        c.image(mask * 255, caption="Ground-truth defect mask", width="stretch")
+    else:
+        c.info("Normal image: no defect mask.")
+    if abs(inspection.score - row["score"]) > 1e-3 * max(1.0, abs(row["score"])):
+        st.caption(
+            f"The model reproduces a score of {inspection.score:.3f} today, which differs from "
+            "the saved one; the saved score is the one evaluated above."
+        )
+    st.caption(
+        "Overlay colors use the model's fixed scale (blue 0, pixel threshold in the middle, red "
+        f"twice that). {VISA_ATTRIBUTION}"
+    )

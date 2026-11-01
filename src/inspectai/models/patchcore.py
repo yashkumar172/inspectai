@@ -30,6 +30,11 @@ the reference method:
 - Nearest-neighbor search is exact (k = 1), without an approximate index.
 - Only the greedy coreset selection runs on the random projection; the bank itself keeps the
   full-dimensional vectors.
+
+Index backends (`PatchCoreConfig.index_backend`, a resource setting that does not define the
+fitted model): `exact` is the original full scan per selection step and `torch.cdist` search.
+`tiled` selects the same coreset with a triangle-inequality prune (see `greedy_coreset`) and
+searches with explicit query x bank tiles. Both are exact; there is no approximate index.
 """
 
 from __future__ import annotations
@@ -39,7 +44,6 @@ import time
 from collections.abc import Iterable, Iterator, Sized
 from dataclasses import dataclass
 
-import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -48,13 +52,30 @@ from numpy.typing import NDArray
 from inspectai.config import RESIZE_MODES, profile_settings, resize_mode_for
 from inspectai.errors import ModelError
 from inspectai.models.base import Prediction
-from inspectai.models.features import FeatureExtractor, WeightsInfo, images_to_batch
+from inspectai.models.features import (
+    Embedder,
+    FeatureExtractor,
+    WeightsInfo,
+    images_to_batch,
+)
+from inspectai.models.refine import (
+    DEFAULT_GUIDED_EPS,
+    DEFAULT_GUIDED_RADIUS,
+    DEFAULT_REFINEMENT,
+    luminance_guide,
+    refine_map,
+    validate_refinement,
+)
 from inspectai.preprocessing.images import ImageArray, map_back
 
 logger = logging.getLogger(__name__)
 
 _BYTES_PER_FLOAT32 = 4
 _DEADLINE_CHECK_EVERY = 64
+_PROJECTION_BLOCK = 32768
+_PRUNE_SLACK = 1e-3  # relative safety margin of the triangle-inequality test (see _greedy_pruned)
+INDEX_BACKENDS = ("exact", "tiled")
+DEFAULT_INDEX_BACKEND = "exact"
 
 
 @dataclass(frozen=True)
@@ -81,8 +102,20 @@ class PatchCoreConfig:
     num_threads: int = 6
     max_bank_gb: float = 4.0
     max_fit_minutes: float = 30.0
+    index_backend: str = DEFAULT_INDEX_BACKEND
+    refinement_filter: str = DEFAULT_REFINEMENT
+    guided_radius: int = DEFAULT_GUIDED_RADIUS
+    guided_eps: float = DEFAULT_GUIDED_EPS
+    grid_layer: str | None = None
 
     def __post_init__(self) -> None:
+        validate_refinement(self.refinement_filter, self.guided_radius, self.guided_eps)
+        if self.grid_layer is not None and self.grid_layer not in self.layers:
+            raise ModelError(f"grid_layer {self.grid_layer!r} is not in layers {self.layers}")
+        if self.index_backend not in INDEX_BACKENDS:
+            raise ModelError(
+                f"index_backend must be one of {INDEX_BACKENDS}, got {self.index_backend!r}"
+            )
         if self.image_size < 8:
             raise ModelError(f"image_size must be at least 8, got {self.image_size}")
         if self.resize_mode not in RESIZE_MODES:
@@ -101,7 +134,7 @@ class PatchCoreConfig:
             raise ModelError("max_bank_gb and max_fit_minutes must be positive")
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        data: dict[str, object] = {
             "backbone": self.backbone,
             "layers": list(self.layers),
             "image_size": self.image_size,
@@ -112,15 +145,27 @@ class PatchCoreConfig:
             "smoothing_sigma": self.smoothing_sigma,
             "seed": self.seed,
         }
+        # Added settings appear only when they differ from the defaults, so the configuration
+        # snapshot of a default model is unchanged and earlier artifacts are not stale.
+        if self.grid_layer is not None:
+            data["grid_layer"] = self.grid_layer
+        if self.refinement_filter != DEFAULT_REFINEMENT:
+            data["refinement_filter"] = self.refinement_filter
+            data["guided_radius"] = self.guided_radius
+            data["guided_eps"] = self.guided_eps
+        return data
 
     def runtime_dict(self) -> dict[str, object]:
-        return {
+        runtime: dict[str, object] = {
             "chunk_size": self.chunk_size,
             "batch_size": self.batch_size,
             "num_threads": self.num_threads,
             "max_bank_gb": self.max_bank_gb,
             "max_fit_minutes": self.max_fit_minutes,
         }
+        if self.index_backend != DEFAULT_INDEX_BACKEND:
+            runtime["index_backend"] = self.index_backend  # omitted by default: old snapshots equal
+        return runtime
 
     def snapshot(self) -> dict[str, object]:
         """The exact configuration used: model settings plus a `runtime` section."""
@@ -143,13 +188,20 @@ def patchcore_config_for(
     profile: str = "dev",
     coreset_ratio: float = 0.10,
     seed: int = 42,
-    **limits: float,
+    multiscale: bool = False,
+    **limits: float | str,
 ) -> PatchCoreConfig:
-    """The configuration of a category under a profile (`dev` or `full`)."""
+    """The configuration of a category under a profile (`dev` or `full`).
+
+    `multiscale` adds `layer1`, average-pooled to the `layer2` grid (see FeatureExtractor).
+    """
     settings = profile_settings(profile)
+    layers = tuple(settings["layers"])  # type: ignore[arg-type]
+    if multiscale:
+        layers, limits = ("layer1", *layers), {**limits, "grid_layer": layers[0]}
     return PatchCoreConfig(
         backbone=str(settings["backbone"]),
-        layers=tuple(settings["layers"]),  # type: ignore[arg-type]
+        layers=layers,
         image_size=int(settings["image_size"]),  # type: ignore[call-overload]
         resize_mode=resize_mode_for(category),
         coreset_ratio=coreset_ratio,
@@ -163,50 +215,87 @@ def estimate_bank_gb(n_images: int, patches_per_image: int, dim: int) -> float:
     return n_images * patches_per_image * dim * _BYTES_PER_FLOAT32 / 1024**3
 
 
+def _project(
+    features: torch.Tensor, projection_dim: int, generator: torch.Generator
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Random projection (Johnson-Lindenstrauss) of (N, D) features, one BLAS call per block.
+
+    Returns the projected vectors (N, P) and their squared norms (N,). The projection matrix is
+    drawn first, so the result does not depend on the block size.
+    """
+    n_points, dim = features.shape
+    projection = torch.randn(dim, projection_dim, generator=generator) / projection_dim**0.5
+    projected = torch.empty(n_points, projection_dim)
+    for start in range(0, n_points, _PROJECTION_BLOCK):
+        stop = start + _PROJECTION_BLOCK
+        torch.matmul(features[start:stop], projection, out=projected[start:stop])
+    return projected, (projected * projected).sum(dim=1)
+
+
+def _check_deadline(count: int, n_select: int, begin: float, max_seconds: float | None) -> None:
+    if (
+        max_seconds is not None
+        and count % _DEADLINE_CHECK_EVERY == 0
+        and time.perf_counter() - begin > max_seconds
+    ):
+        raise ModelError(
+            f"Coreset selection exceeded the time limit after {count} of {n_select} "
+            f"points (max_fit_minutes). Use random subsampling instead: lower "
+            f"max_fit_images, or raise max_fit_minutes if you can wait."
+        )
+
+
 def greedy_coreset(
     features: torch.Tensor,
     n_select: int,
     projection_dim: int = 128,
     seed: int = 42,
     max_seconds: float | None = None,
+    backend: str = DEFAULT_INDEX_BACKEND,
 ) -> torch.Tensor:
     """Indices of a greedy k-center coreset of `features` (N, D).
 
     The features are randomly projected to `projection_dim` dimensions (seeded). A seeded random
     point starts the selection; then the point farthest from all selected points is added
-    repeatedly. Raises ModelError if `max_seconds` elapses first, never returning a partial
-    selection.
+    repeatedly. Both backends keep a running minimum-distance vector `nearest[i]` (squared
+    distance of point i to its closest selected point) and fold in each new center with one
+    distance computation per point instead of recomputing distances to all selected points.
+
+    `exact` scans every point at every step (memory-bandwidth bound: it reads the whole projected
+    matrix each time). `tiled` skips points that provably cannot be closer to the new center
+    (triangle inequality), which selects the same points far faster; see `_greedy_pruned`.
+    Raises ModelError if `max_seconds` elapses first, never returning a partial selection.
     """
+    if backend not in INDEX_BACKENDS:
+        raise ModelError(f"backend must be one of {INDEX_BACKENDS}, got {backend!r}")
     n_points = features.shape[0]
     if not 1 <= n_select <= n_points:
         raise ModelError(f"n_select must be between 1 and {n_points}, got {n_select}")
     if n_select == n_points:
         return torch.arange(n_points)
     generator = torch.Generator().manual_seed(seed)
-    dim = features.shape[1]
-    projection = torch.randn(dim, projection_dim, generator=generator) / projection_dim**0.5
-    projected = torch.empty(n_points, projection_dim)
-    for start in range(0, n_points, 32768):
-        projected[start : start + 32768] = features[start : start + 32768] @ projection
-    squared = (projected * projected).sum(dim=1)
-
+    projected, squared = _project(features, projection_dim, generator)
     start_index = int(torch.randint(n_points, (1,), generator=generator))
+    if backend == "tiled":
+        return _greedy_pruned(projected, squared, n_select, start_index, max_seconds)
+    return _greedy_scan(projected, squared, n_select, start_index, max_seconds)
+
+
+def _greedy_scan(
+    projected: torch.Tensor,
+    squared: torch.Tensor,
+    n_select: int,
+    start_index: int,
+    max_seconds: float | None,
+) -> torch.Tensor:
+    """The original selection loop: one full pass over all points per step."""
     selected = torch.empty(n_select, dtype=torch.int64)
     selected[0] = start_index
     nearest = squared - 2.0 * torch.mv(projected, projected[start_index]) + squared[start_index]
     nearest[start_index] = -1.0  # selected points are never picked again
     begin = time.perf_counter()
     for count in range(1, n_select):
-        if (
-            max_seconds is not None
-            and count % _DEADLINE_CHECK_EVERY == 0
-            and time.perf_counter() - begin > max_seconds
-        ):
-            raise ModelError(
-                f"Coreset selection exceeded the time limit after {count} of {n_select} "
-                f"points (max_fit_minutes). Use random subsampling instead: lower "
-                f"max_fit_images, or raise max_fit_minutes if you can wait."
-            )
+        _check_deadline(count, n_select, begin, max_seconds)
         chosen = int(torch.argmax(nearest))
         selected[count] = chosen
         distance = squared - 2.0 * torch.mv(projected, projected[chosen]) + squared[chosen]
@@ -215,23 +304,91 @@ def greedy_coreset(
     return selected
 
 
+def _greedy_pruned(
+    projected: torch.Tensor,
+    squared: torch.Tensor,
+    n_select: int,
+    start_index: int,
+    max_seconds: float | None,
+) -> torch.Tensor:
+    """Greedy k-center with triangle-inequality pruning (Elkan-style), same result as the scan.
+
+    Every point remembers the selected center it is closest to (`owner`). A new center c can only
+    be closer to point x than x's owner o if d(c, o) < 2 d(x, o): otherwise
+    d(c, x) >= d(c, o) - d(x, o) >= d(x, o). Only points passing that test get a fresh distance
+    to c, a few percent of all points once the selection covers the data. The center-to-center
+    distances cost k x P per step against N x P for the scan, and pruned points never touch the
+    projected matrix. `_PRUNE_SLACK` widens the test so rounding cannot prune a point the scan
+    would update.
+    """
+    n_points, dim = projected.shape
+    selected = torch.empty(n_select, dtype=torch.int64)
+    centers = torch.empty(n_select, dim)  # projected selected points, in selection order
+    center_sq = torch.empty(n_select)
+    selected[0] = start_index
+    centers[0], center_sq[0] = projected[start_index], squared[start_index]
+    nearest = squared - 2.0 * torch.mv(projected, projected[start_index]) + squared[start_index]
+    nearest[start_index] = -1.0
+    owner = torch.zeros(n_points, dtype=torch.int64)
+    begin = time.perf_counter()
+    for count in range(1, n_select):
+        _check_deadline(count, n_select, begin, max_seconds)
+        chosen = int(torch.argmax(nearest))
+        point, point_sq = projected[chosen], squared[chosen]
+        selected[count] = chosen
+        centers[count], center_sq[count] = point, point_sq
+        # squared distance from the new center to every earlier center
+        to_centers = center_sq[:count] - 2.0 * torch.mv(centers[:count], point) + point_sq
+        keep = to_centers[owner] < 4.0 * nearest * (1.0 + _PRUNE_SLACK) + 1e-4 * point_sq
+        candidates = keep.nonzero().squeeze(1)
+        distance = squared[candidates] - 2.0 * torch.mv(projected[candidates], point) + point_sq
+        closer = distance < nearest[candidates]
+        updated = candidates[closer]
+        nearest[updated] = distance[closer]
+        owner[updated] = count
+        nearest[chosen] = -1.0
+    return selected
+
+
 def nearest_neighbor_distances(
-    queries: torch.Tensor, bank: torch.Tensor, chunk_size: int = 16384
+    queries: torch.Tensor,
+    bank: torch.Tensor,
+    chunk_size: int = 16384,
+    backend: str = DEFAULT_INDEX_BACKEND,
 ) -> torch.Tensor:
     """Euclidean distance from each query (Q, D) to its nearest bank vector (M, D).
 
-    Exact search with chunked `torch.cdist`: only a (Q, chunk_size) distance block exists at a
-    time.
+    Exact search. `exact` uses chunked `torch.cdist`: only a (Q, chunk_size) distance block exists
+    at a time. `tiled` computes the same distances from squared norms and one `addmm` per bank
+    tile; its results agree with `exact` to float32 rounding (about 1e-6 relative), not bit for
+    bit.
     """
     if queries.ndim != 2 or bank.ndim != 2 or queries.shape[1] != bank.shape[1]:
         raise ModelError(f"Incompatible shapes {tuple(queries.shape)} and {tuple(bank.shape)}")
     if chunk_size < 1:
         raise ModelError("chunk_size must be at least 1")
+    if backend not in INDEX_BACKENDS:
+        raise ModelError(f"backend must be one of {INDEX_BACKENDS}, got {backend!r}")
+    if backend == "tiled":
+        return _tiled_nearest(queries, bank, chunk_size)
     best = torch.full((queries.shape[0],), float("inf"))
     for start in range(0, bank.shape[0], chunk_size):
         block = torch.cdist(queries, bank[start : start + chunk_size])
         best = torch.minimum(best, block.min(dim=1).values)
     return best
+
+
+def _tiled_nearest(queries: torch.Tensor, bank: torch.Tensor, tile: int) -> torch.Tensor:
+    """Blocked nearest-neighbor search: min over bank tiles of |q|^2 + |b|^2 - 2 q.b."""
+    query_sq = (queries * queries).sum(dim=1)
+    bank_sq = (bank * bank).sum(dim=1)
+    best = torch.full((queries.shape[0],), float("inf"))
+    for start in range(0, bank.shape[0], tile):
+        stop = start + tile
+        # -2 q.b + |b|^2 in one addmm; |q|^2 is constant per query and added once at the end
+        block = torch.addmm(bank_sq[start:stop], queries, bank[start:stop].T, alpha=-2.0)
+        best = torch.minimum(best, block.min(dim=1).values)
+    return (best + query_sq).clamp_(min=0.0).sqrt_()
 
 
 class PatchCoreModel:
@@ -250,6 +407,10 @@ class PatchCoreModel:
         self.reference_aspect_ratio: float | None = None
         self.feature_map_shape: tuple[int, int] | None = None
         self._bank: torch.Tensor | None = None
+
+    def use_extractor(self, extractor: Embedder) -> None:
+        """Replace the feature extractor, e.g. by an INT8 one (the fitted tensors are untouched)."""
+        self._extractor = extractor  # type: ignore[assignment]
 
     @property
     def bank_size(self) -> int:
@@ -353,7 +514,12 @@ class PatchCoreModel:
             )
         logger.info("Coreset: selecting %d of %d vectors", n_select, self.n_candidates)
         indices = greedy_coreset(
-            candidates, n_select, cfg.projection_dim, cfg.seed, max_seconds=remaining
+            candidates,
+            n_select,
+            cfg.projection_dim,
+            cfg.seed,
+            max_seconds=remaining,
+            backend=cfg.index_backend,
         )
         self.coreset_seconds = time.perf_counter() - select_start
         self._bank = candidates[indices].contiguous().clone()
@@ -380,7 +546,9 @@ class PatchCoreModel:
         torch.set_num_threads(cfg.num_threads)
         batch, infos = images_to_batch([image], cfg.image_size, cfg.resize_mode)
         vectors, _ = self._patches(batch)
-        distance = nearest_neighbor_distances(vectors[0], self._bank, cfg.chunk_size)
+        distance = nearest_neighbor_distances(
+            vectors[0], self._bank, cfg.chunk_size, cfg.index_backend
+        )
         height, width = self.feature_map_shape
         upsampled = F.interpolate(
             distance.reshape(1, 1, height, width),
@@ -388,10 +556,15 @@ class PatchCoreModel:
             mode="bilinear",
             align_corners=False,
         )[0, 0].numpy()
-        if cfg.smoothing_sigma > 0:
-            upsampled = cv2.GaussianBlur(
-                upsampled, (0, 0), cfg.smoothing_sigma, borderType=cv2.BORDER_REFLECT
-            )
+        guide = luminance_guide(batch[0]) if cfg.refinement_filter == "guided" else None
+        upsampled = refine_map(
+            upsampled,
+            guide,
+            cfg.refinement_filter,
+            cfg.smoothing_sigma,
+            cfg.guided_radius,
+            cfg.guided_eps,
+        )
         anomaly_map = map_back(upsampled.astype(np.float32), infos[0])
         return Prediction(score=float(anomaly_map.max()), anomaly_map=anomaly_map)
 

@@ -152,6 +152,50 @@ def load_results(
     return results
 
 
+FALSE_POSITIVE = "false_positive"
+FALSE_NEGATIVE = "false_negative"
+
+
+def display_name(image_rel: str) -> str:
+    """The last two parts of a split-file image path (for example `Anomaly/000.JPG`).
+
+    The split file's paths are relative to the dataset; showing only the tail keeps the object
+    folder structure out of the page (and no host path is ever involved).
+    """
+    parts = [p for p in image_rel.replace("\\", "/").split("/") if p]
+    return "/".join(parts[-2:])
+
+
+def misclassified_images(run: Run) -> dict[str, list[dict]]:
+    """The images a run got wrong at its stored threshold, from its saved `predictions.csv`.
+
+    A false positive is a normal image (label 0) scored above the threshold; a false negative is
+    an anomalous image (label 1) scored at or below it (the decision rule is `score > threshold`).
+    Each entry holds the image path, label, score, threshold, and `ratio` (score / threshold).
+    False positives are ordered from the highest score, false negatives from the lowest: the most
+    clear-cut mistakes first.
+    """
+    false_positives: list[dict] = []
+    false_negatives: list[dict] = []
+    for row in run.predictions:
+        flagged = row["score"] > row["threshold"]
+        entry = {
+            "image": row["image"],
+            "name": display_name(row["image"]),
+            "label": row["label"],
+            "score": row["score"],
+            "threshold": row["threshold"],
+            "ratio": row["score"] / row["threshold"] if row["threshold"] else float("nan"),
+        }
+        if row["label"] == 0 and flagged:
+            false_positives.append(entry)
+        elif row["label"] == 1 and not flagged:
+            false_negatives.append(entry)
+    false_positives.sort(key=lambda e: (-e["score"], e["image"]))
+    false_negatives.sort(key=lambda e: (e["score"], e["image"]))
+    return {FALSE_POSITIVE: false_positives, FALSE_NEGATIVE: false_negatives}
+
+
 def metric_rows(results: CategoryResults) -> list[dict[str, object]]:
     """Display rows (one per model) for the metrics table; undefined values are the text 'undefined'."""
 

@@ -68,6 +68,7 @@ The measurements are detailed in the model sections below and in [docs/environme
 - [docs/architecture.md](docs/architecture.md): data flow, feature extraction, splits and thresholds, how each model scores, persistence, and the UI integration.
 - [docs/evaluation.md](docs/evaluation.md): metrics, threshold selection, comparison method, deviations from the published algorithms, and how to reproduce every number.
 - [docs/limitations.md](docs/limitations.md): what the results do not show, what is unfinished, and future work.
+- [docs/benchmarks.md](docs/benchmarks.md): coreset speedup, localization variants, latency percentiles, and INT8.
 - [docs/final_report.md](docs/final_report.md): the final project report with the Definition-of-Done check.
 - [docs/environment.md](docs/environment.md): hardware, versions, and locations.
 
@@ -371,6 +372,21 @@ Reading the comparison with care:
 - Model C does **not** improve pixel-level overlap: IoU/Dice at the calibrated pixel threshold are 0.18-0.20 / 0.31-0.34 for Model C, at or slightly below Model B (0.19-0.26 / 0.32-0.41) and slightly below the classical baseline (0.21-0.24 / 0.35-0.39) in both categories. Pixel AUROC is about 0.99 for both deep models and is inflated by the many background pixels.
 - F1 at the calibrated threshold depends on a threshold taken from only 45 calibration images, so recall is limited (0.52-0.64 for Model C) while false positives are rare. The F1 difference between `dev` and `full` for the same model is mostly this threshold effect, not ranking quality.
 - Model C costs more: about 11 minutes to fit and 0.2-0.65 s per image against 17-52 s and 0.04-0.13 s for Model B. No model has been selected as the default; that follows the evaluation protocol in a later milestone.
+
+### Faster fitting, optional refinements, and benchmarks
+
+All of these are optional, off by default, and leave existing artifacts valid; measurements and caveats are in [docs/benchmarks.md](docs/benchmarks.md).
+
+```powershell
+python scripts/fit_model.py --model patchcore --category cashew --profile dev --index-backend tiled
+python scripts/fit_model.py --model patchcore --category pcb1 --profile dev --max-fit-images 400 `
+    --multiscale --refinement-filter guided --output-dir $env:INSPECTAI_ARTIFACT_DIR\patchcore-msguided\pcb1
+python scripts/benchmark_latency.py --category cashew --variants fp32 tiled dynamic static
+```
+
+- `--index-backend tiled` selects **the same coreset 3.5x to 5x faster** (cashew 662 s to 189 s; the real candle / pcb1 / pcb2 fits 596 s to about 120 s, whole fit about 610 s to about 140 s) with a triangle-inequality prune; the stored banks are byte-identical to the default `exact` ones. Its nearest-neighbor kernel is exact to float32 rounding and cut Model C's median latency from 209 ms to 142 ms. An approximate HNSW index is deliberately not offered.
+- `--refinement-filter guided` (edge-aware smoothing of the anomaly map) and `--multiscale` (adds `layer1` features, pooled to the `layer2` grid) were evaluated on `candle`, `pcb1`, and `pcb2` to raise pixel IoU / Dice. **They did not**: IoU / Dice were unchanged or slightly lower (mean IoU 0.051 for the baseline, 0.048 with the guided filter, 0.051 with `layer1`). Image AUROC rose a little (mean 0.898 to 0.911 with `layer1`), but the intervals overlap, so that is not demonstrated. Both stay off by default.
+- INT8: `quantize_dynamic` converts nothing in a ResNet feature trunk (no convolution kernel), and static INT8 gives Model B a 14% median speedup for -0.004 AUROC but gives Model C no speedup and -0.048 AUROC. Not recommended for Model C.
 
 ## Comparison report (Milestone 5)
 

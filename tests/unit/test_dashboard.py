@@ -10,11 +10,15 @@ import pytest
 from make_world import World
 
 from inspectai.evaluation.dashboard import (
+    FALSE_NEGATIVE,
+    FALSE_POSITIVE,
     ExampleImage,
     confusion_matrix,
+    display_name,
     load_category,
     load_results,
     metric_rows,
+    misclassified_images,
     performance_rows,
 )
 
@@ -160,3 +164,80 @@ def test_saved_example_figures_are_listed_with_captions(world: World, reports: P
     ]
     assert all(isinstance(e, ExampleImage) and e.path.is_file() for e in result.examples)
     assert load_results(reports, world.artifacts)["pipe_fryum"].examples == ()
+
+
+# ----- error analysis --------------------------------------------------------------------------
+
+
+def test_misclassified_images_are_derived_from_the_saved_predictions(
+    world: World, reports: Path
+) -> None:
+    cashew = load_results(reports, world.artifacts)["cashew"]
+    for run in cashew.runs:
+        errors = misclassified_images(run)
+        path = reports / run.spec.report_folder / "cashew" / "predictions.csv"
+        with path.open(newline="", encoding="utf-8") as handle:
+            rows = list(csv.DictReader(handle))
+        false_positives = {
+            r["image"]
+            for r in rows
+            if r["label"] == "0" and float(r["score"]) > float(r["threshold"])
+        }
+        false_negatives = {
+            r["image"]
+            for r in rows
+            if r["label"] == "1" and not float(r["score"]) > float(r["threshold"])
+        }
+        assert {e["image"] for e in errors[FALSE_POSITIVE]} == false_positives
+        assert {e["image"] for e in errors[FALSE_NEGATIVE]} == false_negatives
+        # consistent with the confusion matrix the harness stored
+        matrix = run.image_metrics["confusion_matrix"]
+        assert len(false_positives) == matrix["fp"] and len(false_negatives) == matrix["fn"]
+
+
+def _row(name: str, label: int, score: float) -> dict:
+    folder = "Anomaly" if label else "Normal"
+    return {
+        "image": f"obj/Data/Images/{folder}/{name}.JPG",
+        "split": "test",
+        "label": label,
+        "score": score,
+        "predicted": int(score > 1.0),
+        "threshold": 1.0,
+    }
+
+
+def test_the_mistakes_are_ordered_most_clear_cut_first() -> None:
+    from inspectai.evaluation.comparison import Run
+
+    predictions = [
+        _row("a", 0, 1.2),
+        _row("b", 0, 3.0),
+        _row("c", 0, 0.5),
+        _row("d", 1, 0.2),
+        _row("e", 1, 0.9),
+        _row("f", 1, 2.0),
+    ]
+    run = Run(None, "obj", {}, predictions, None)  # type: ignore[arg-type]
+    errors = misclassified_images(run)
+    assert [e["name"] for e in errors[FALSE_POSITIVE]] == ["Normal/b.JPG", "Normal/a.JPG"]
+    assert [e["name"] for e in errors[FALSE_NEGATIVE]] == ["Anomaly/d.JPG", "Anomaly/e.JPG"]
+    assert errors[FALSE_POSITIVE][0]["ratio"] == pytest.approx(3.0)
+    # a score exactly at the threshold is NOT flagged (the rule is score > threshold)
+    boundary = Run(None, "obj", {}, [_row("g", 1, 1.0), _row("h", 0, 1.0)], None)  # type: ignore[arg-type]
+    result = misclassified_images(boundary)
+    assert [e["name"] for e in result[FALSE_NEGATIVE]] == ["Anomaly/g.JPG"]
+    assert result[FALSE_POSITIVE] == []
+
+
+@pytest.mark.parametrize(
+    ("image_rel", "expected"),
+    [
+        ("cashew/Data/Images/Anomaly/000.JPG", "Anomaly/000.JPG"),
+        ("cashew\\Data\\Images\\Normal\\0001.JPG", "Normal/0001.JPG"),
+        ("000.JPG", "000.JPG"),
+        ("", ""),
+    ],
+)
+def test_the_display_name_keeps_only_the_last_two_path_parts(image_rel: str, expected: str) -> None:
+    assert display_name(image_rel) == expected

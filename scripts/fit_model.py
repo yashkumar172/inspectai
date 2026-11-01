@@ -45,7 +45,18 @@ from inspectai.evaluation.thresholds import DEFAULT_QUANTILE
 from inspectai.models.classical import ClassicalConfig, ClassicalModel
 from inspectai.models.features import FeatureExtractor, load_backbone
 from inspectai.models.gaussian import GaussianModel, gaussian_config_for
-from inspectai.models.patchcore import PatchCoreModel, patchcore_config_for
+from inspectai.models.patchcore import (
+    DEFAULT_INDEX_BACKEND,
+    INDEX_BACKENDS,
+    PatchCoreModel,
+    patchcore_config_for,
+)
+from inspectai.models.refine import (
+    DEFAULT_GUIDED_EPS,
+    DEFAULT_GUIDED_RADIUS,
+    DEFAULT_REFINEMENT,
+    REFINEMENT_FILTERS,
+)
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
@@ -74,6 +85,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-bank-gb", type=float, default=4.0, help="patchcore only.")
     parser.add_argument("--max-fit-minutes", type=float, default=30.0, help="patchcore only.")
     parser.add_argument("--chunk-size", type=int, default=16384, help="patchcore only.")
+    parser.add_argument(
+        "--index-backend",
+        choices=INDEX_BACKENDS,
+        default=DEFAULT_INDEX_BACKEND,
+        help="patchcore only; coreset and search kernel. Both are exact and select the same "
+        "coreset; 'tiled' is faster (see docs/benchmarks.md).",
+    )
+    parser.add_argument(
+        "--refinement-filter",
+        choices=REFINEMENT_FILTERS,
+        default=DEFAULT_REFINEMENT,
+        help="gaussian and patchcore: how the upsampled score map is smoothed (default gaussian).",
+    )
+    parser.add_argument("--guided-radius", type=int, default=DEFAULT_GUIDED_RADIUS)
+    parser.add_argument("--guided-eps", type=float, default=DEFAULT_GUIDED_EPS)
+    parser.add_argument(
+        "--multiscale",
+        action="store_true",
+        help="gaussian and patchcore: add layer1 features, average-pooled to the layer2 grid. "
+        "Changes the fitted model, so use a separate --output-dir / --artifact-dir.",
+    )
     parser.add_argument("--quantile", type=float, default=DEFAULT_QUANTILE)
     parser.add_argument("--seed", type=int, default=SplitConfig().seed)
     parser.add_argument(
@@ -116,26 +148,36 @@ def _run(args: argparse.Namespace) -> int:
         model = ClassicalModel(ClassicalConfig(resize_mode=resize_mode_for(args.category)))
     elif args.model == "gaussian":
         gaussian_config = gaussian_config_for(
-            args.category, args.profile, args.feature_dim, args.seed
+            args.category,
+            args.profile,
+            args.feature_dim,
+            args.seed,
+            args.multiscale,
+            args.refinement_filter,
+            args.guided_radius,
+            args.guided_eps,
         )
         backbone, weights = load_backbone(gaussian_config.backbone)
-        model = GaussianModel(
-            gaussian_config, FeatureExtractor(backbone, gaussian_config.layers), weights
-        )
+        extractor = FeatureExtractor(backbone, gaussian_config.layers, gaussian_config.grid_layer)
+        model = GaussianModel(gaussian_config, extractor, weights)
     else:
         patchcore_config = patchcore_config_for(
             args.category,
             args.profile,
             args.coreset_ratio,
             args.seed,
+            args.multiscale,
+            refinement_filter=args.refinement_filter,
+            guided_radius=args.guided_radius,
+            guided_eps=args.guided_eps,
             chunk_size=args.chunk_size,
+            index_backend=args.index_backend,
             max_bank_gb=args.max_bank_gb,
             max_fit_minutes=args.max_fit_minutes,
         )
         backbone, weights = load_backbone(patchcore_config.backbone)
-        model = PatchCoreModel(
-            patchcore_config, FeatureExtractor(backbone, patchcore_config.layers), weights
-        )
+        extractor = FeatureExtractor(backbone, patchcore_config.layers, patchcore_config.grid_layer)
+        model = PatchCoreModel(patchcore_config, extractor, weights)
 
     stats = fit_model(model, dataset, splits)
     options = EvalOptions(quantile=args.quantile, split_seed=args.seed)

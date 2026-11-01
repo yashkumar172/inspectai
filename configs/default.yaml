@@ -79,6 +79,10 @@ gaussian:                    # Model B (backbone, layers, image size and resize 
   seed: 42
   batch_size: 8
   num_threads: 6
+  refinement_filter: gaussian  # how the upsampled score map is smoothed: gaussian | guided
+  guided_radius: 8             # guided filter window radius in model-input pixels (guided only)
+  guided_eps: 0.01             # guided filter regularization on a [0, 1] luminance guide
+  multiscale: false            # true adds layer1 (average-pooled to the layer2 grid); refit needed
 
 patchcore:                   # Model C
   coreset_ratio: 0.1
@@ -92,6 +96,11 @@ patchcore:                   # Model C
   max_bank_gb: 4.0
   max_fit_minutes: 30.0
   max_fit_images: null       # null = fit on the whole fit split; a number = recorded seeded subset
+  index_backend: exact       # exact | tiled: coreset and nearest-neighbor kernel (both exact; see docs/benchmarks.md)
+  refinement_filter: gaussian  # gaussian | guided (edge-aware), see docs/architecture.md section 9
+  guided_radius: 8
+  guided_eps: 0.01
+  multiscale: false          # true adds layer1 (average-pooled to the layer2 grid); refit needed
 
 app:                         # Streamlit app (SPEC.md Section 8)
   max_upload_mb: 10

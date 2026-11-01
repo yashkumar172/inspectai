@@ -13,6 +13,7 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 import torch
@@ -130,17 +131,34 @@ def freeze(model: nn.Module) -> nn.Module:
     return model
 
 
+class Embedder(Protocol):
+    """What a model needs from a feature extractor (the float and the INT8 ones both fit)."""
+
+    layers: tuple[str, ...]
+    grid_layer: str | None
+
+    def embed(self, batch: torch.Tensor) -> torch.Tensor: ...
+
+
 class FeatureExtractor:
     """Intermediate spatial features of a frozen backbone.
 
-    `embed` returns the requested layers resized to the resolution of the first layer and
-    concatenated along channels, shape (batch, total_channels, h, w).
+    `embed` returns the requested layers resized to one common grid and concatenated along
+    channels, shape (batch, total_channels, h, w). The grid is the resolution of the first layer,
+    or of `grid_layer` when given. A layer finer than the grid is average-pooled down to it (so a
+    high-resolution layer such as `layer1` adds its channels but not its patch count); a coarser
+    layer is upsampled bilinearly.
     """
 
-    def __init__(self, backbone: nn.Module, layers: Sequence[str]) -> None:
+    def __init__(
+        self, backbone: nn.Module, layers: Sequence[str], grid_layer: str | None = None
+    ) -> None:
         self.layers = tuple(layers)
         if not self.layers or len(set(self.layers)) != len(self.layers):
             raise ModelError(f"layers must be a non-empty list of distinct names, got {layers!r}")
+        if grid_layer is not None and grid_layer not in self.layers:
+            raise ModelError(f"grid_layer {grid_layer!r} is not one of the layers {self.layers}")
+        self.grid_layer = grid_layer
         freeze(backbone)
         try:
             self._net = create_feature_extractor(backbone, {name: name for name in self.layers})
@@ -157,14 +175,17 @@ class FeatureExtractor:
             raise ModelError(f"Expected a (batch, 3, H, W) tensor, got {tuple(batch.shape)}")
         outputs = self._net(batch)
         maps = [outputs[name] for name in self.layers]
-        size = maps[0].shape[-2:]
-        resized = [
-            m
-            if m.shape[-2:] == size
-            else F.interpolate(m, size=size, mode="bilinear", align_corners=False)
-            for m in maps
-        ]
+        reference = maps[0] if self.grid_layer is None else outputs[self.grid_layer]
+        size = reference.shape[-2:]
+        resized = [m if m.shape[-2:] == size else _to_grid(m, size) for m in maps]
         return torch.cat(resized, dim=1)
+
+
+def _to_grid(feature_map: torch.Tensor, size: torch.Size) -> torch.Tensor:
+    """Bring a feature map to `size`: average-pool a finer map, upsample a coarser one."""
+    if feature_map.shape[-2] >= size[0] and feature_map.shape[-1] >= size[1]:
+        return F.adaptive_avg_pool2d(feature_map, tuple(size))
+    return F.interpolate(feature_map, size=size, mode="bilinear", align_corners=False)
 
 
 def images_to_batch(

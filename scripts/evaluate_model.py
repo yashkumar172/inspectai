@@ -57,7 +57,17 @@ from inspectai.evaluation.thresholds import DEFAULT_QUANTILE, POLICIES
 from inspectai.models.base import AnomalyModel
 from inspectai.models.classical import ClassicalConfig, ClassicalModel
 from inspectai.models.gaussian import gaussian_config_for
-from inspectai.models.patchcore import patchcore_config_for
+from inspectai.models.patchcore import (
+    DEFAULT_INDEX_BACKEND,
+    INDEX_BACKENDS,
+    patchcore_config_for,
+)
+from inspectai.models.refine import (
+    DEFAULT_GUIDED_EPS,
+    DEFAULT_GUIDED_RADIUS,
+    DEFAULT_REFINEMENT,
+    REFINEMENT_FILTERS,
+)
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
@@ -82,6 +92,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--chunk-size", type=int, default=16384, help="patchcore only; search block size."
+    )
+    parser.add_argument(
+        "--index-backend",
+        choices=INDEX_BACKENDS,
+        default=DEFAULT_INDEX_BACKEND,
+        help="patchcore only; nearest-neighbor kernel (both are exact; see docs/benchmarks.md).",
+    )
+    parser.add_argument(
+        "--refinement-filter",
+        choices=REFINEMENT_FILTERS,
+        default=DEFAULT_REFINEMENT,
+        help="gaussian and patchcore: how the upsampled score map is smoothed (default gaussian).",
+    )
+    parser.add_argument("--guided-radius", type=int, default=DEFAULT_GUIDED_RADIUS)
+    parser.add_argument("--guided-eps", type=float, default=DEFAULT_GUIDED_EPS)
+    parser.add_argument(
+        "--multiscale",
+        action="store_true",
+        help="gaussian and patchcore: add layer1 features, average-pooled to the layer2 grid. "
+        "Changes the fitted model, so use a separate --output-dir / --artifact-dir.",
     )
     parser.add_argument("--threshold-policy", choices=POLICIES, default=POLICIES[0])
     parser.add_argument("--quantile", type=float, default=DEFAULT_QUANTILE)
@@ -138,12 +168,33 @@ def _evaluate(
 
     directory = args.artifact_dir or artifact_dir(paths_artifact_dir, args.model, args.category)
     if args.model == "gaussian":
-        requested = gaussian_config_for(args.category, args.profile, args.feature_dim, args.seed)
+        requested = gaussian_config_for(
+            args.category,
+            args.profile,
+            args.feature_dim,
+            args.seed,
+            args.multiscale,
+            args.refinement_filter,
+            args.guided_radius,
+            args.guided_eps,
+        )
         model, artifact = load_gaussian(directory, args.category, requested)
     else:
-        requested = patchcore_config_for(args.category, args.profile, args.coreset_ratio, args.seed)
+        requested = patchcore_config_for(
+            args.category,
+            args.profile,
+            args.coreset_ratio,
+            args.seed,
+            args.multiscale,
+            refinement_filter=args.refinement_filter,
+            guided_radius=args.guided_radius,
+            guided_eps=args.guided_eps,
+        )
         model, artifact = load_patchcore(
-            directory, args.category, requested, runtime={"chunk_size": args.chunk_size}
+            directory,
+            args.category,
+            requested,
+            runtime={"chunk_size": args.chunk_size, "index_backend": args.index_backend},
         )
     calibration = Calibration.from_dict(artifact.manifest["calibration"])  # type: ignore[arg-type]
     stored_resolution = artifact.manifest.get("eval_resolution")

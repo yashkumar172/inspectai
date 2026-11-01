@@ -112,7 +112,7 @@ def load_gaussian(
         model = GaussianModel.from_tensors(
             config,
             artifact.tensors,
-            FeatureExtractor(backbone, config.layers),
+            FeatureExtractor(backbone, config.layers, config.grid_layer),
             weights,
             feature_map_shape,
             total_channels,

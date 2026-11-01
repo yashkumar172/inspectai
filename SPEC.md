@@ -289,6 +289,10 @@ Do not claim full PatchCore equivalence if the implementation uses a simplified 
 
 If a full implementation is too expensive on CPU, implement and evaluate a smaller PatchCore-inspired version first.
 
+**Index backend (optional).** `index_backend` is `exact` (default) or `tiled`; it is a resource setting (stored under `runtime`, not part of the fitted model's definition). Both backends are exact and select the same coreset. `tiled` prunes the greedy k-center update with the triangle inequality (a point is re-measured only when the new center could be closer than its current nearest center) and searches with blocked `addmm` tiles, which agree with `exact` to float32 rounding (about 1e-6 relative). No approximate index (such as HNSW) is provided: it would add a dependency and give up exact search and bit-for-bit reproducibility. The measured speedup is in `docs/benchmarks.md`.
+
+**Optional spatial refinements.** `multiscale` adds `layer1` features, average-pooled to the `layer2` grid (so the patch count is unchanged and D grows by the `layer1` channel count: +64 for `resnet18`). `refinement_filter: guided` replaces the Gaussian smoothing of the anomaly map by an edge-aware guided filter (Section 6). Both default to off, change nothing for existing artifacts, and are recorded in the configuration snapshot only when enabled.
+
 ### 5.4 Model selection
 
 The default final model should be the best method supported by reproducible evaluation results obtained under the protocol in Section 3.5 (never by tuning on the test split).
@@ -316,7 +320,8 @@ Rules:
 - Peak RAM during fitting should stay below 8 GB, leaving room for the OS and other applications. Measure it (process RSS) and report it.
 - Run all inference under `torch.inference_mode()`. Set `torch.set_num_threads(cfg.num_threads)` explicitly (default 6, the physical core count). DataLoader `num_workers` defaults to 0 on Windows.
 - Exact k-nearest-neighbor search uses chunked `torch.cdist` (configurable chunk size). Do not add faiss.
-- Coreset reduction: greedy k-center on features randomly projected to 128 dimensions, seeded, default ratio 0.10. If fitting time exceeds `max_fit_minutes` (default 30), stop with a clear message suggesting random subsampling. Never fall back silently.
+- Coreset reduction: greedy k-center on features randomly projected to 128 dimensions (one blocked BLAS call per 32,768 vectors), seeded, default ratio 0.10, maintaining a running minimum-distance vector so each step folds in one new center. If fitting time exceeds `max_fit_minutes` (default 30), stop with a clear message suggesting random subsampling. Never fall back silently. With `index_backend: tiled` the same coreset is selected about 3.5 times faster (measured: 662 s to 189 s for 31,752 of 317,520 `dev` vectors); its extra memory is the selected-center matrix (`n_select x 128 x 4` bytes, 16 MB there) plus one int64 per candidate, and the measured peak working set did not change (1.05 GB).
+- Memory with `multiscale`: the bank estimate uses the larger D (448 instead of 384 for `resnet18`, 1792 instead of 1536 for `wide_resnet50_2`), so the unreduced bank grows by 17%; check it against `max_bank_gb` as usual.
 - Provisional latency targets, to be confirmed or revised at Milestone 3 from measurements: `dev` ≤ 1 s/image, `full` ≤ 3 s/image. If missed, document the measured values and do not claim the targets.
 - Plug the laptop in and use a high-performance power plan when benchmarking, and record that in the report.
 
@@ -346,7 +351,7 @@ Requirements:
 - Do not silently interpret a failed image read as an empty image.
 - Resize mode is configurable per category: `stretch` (direct resize to a square of side `image_size`, with no center crop, so border defects are not cut off) or `letterbox` (pad to a square while keeping the aspect ratio, and remove the padding when mapping the anomaly map back to the original image). The official VisA README does not document image sizes, so `validate_dataset.py` reports per-object size and aspect-ratio statistics (Section 3.3). Choose the mode for each category from those measurements and record it in the artifact manifest. Normalize with ImageNet mean and standard deviation. Convert grayscale to three channels by replication.
 - Uploaded images whose aspect ratio differs by more than 25% from the category's reference aspect ratio (the median of the `fit` images, stored in the artifact manifest) are rejected with a clear message.
-- Smooth anomaly maps with a Gaussian filter (default sigma = 4, applied at the model input resolution and configurable), then resize them to the original image size.
+- Smooth anomaly maps with a Gaussian filter (default sigma = 4, applied at the model input resolution and configurable), then resize them to the original image size. Optionally (`refinement_filter: guided`) use a guided filter (He et al., 2013) whose guide is the luminance of the preprocessed input, with fixed radius (default 8 pixels) and regularization (default 0.01 on a [0, 1] guide): it smooths flat regions like a box filter but keeps the map's boundaries on image edges. Its settings are fixed in advance, stored in the artifact configuration, and thresholds are calibrated with the same filter on `calibration_normal`.
 - Cap image decoding: set `Image.MAX_IMAGE_PIXELS` and reject images over 4096×4096 before decoding them fully.
 
 Create unit tests for color conversion, resizing, output dimensions, and overlay generation.
@@ -408,6 +413,7 @@ Measure and report:
 - Feature memory-bank size.
 - Image resolution and hardware used.
 - Number of images used in each experiment.
+- Latency percentiles (p50, p95, p99) over repeated single-image calls, throughput, and the working set, per model (`scripts/benchmark_latency.py`). Optional INT8 backbone variants are reported with their image-AUROC change; `torch.ao.quantization.quantize_dynamic` converts only Linear layers, so on a ResNet feature trunk it is reported as converting nothing on the feature path, and static INT8 is measured separately.
 
 Do not fabricate performance numbers.
 
@@ -486,6 +492,7 @@ Include:
 - Inference performance.
 - Representative predictions.
 - Confusion matrix where applicable.
+- Error analysis: the false positives (normal images above the threshold) and false negatives (anomalous images at or below it), read from the saved `predictions.csv`, ordered from the most clear-cut. Selecting one shows its score, the calibrated threshold, the ground-truth label, and (when the dataset is available locally) the original image, the anomaly overlay, and the ground-truth mask. Only images listed in the split file are opened; a hosted run without the dataset shows the scores only.
 
 Clearly label the dataset split used to calculate the displayed metrics.
 
@@ -532,6 +539,7 @@ Support configuration of:
 - Calibration hold-out fraction and split seed.
 - Profile (`dev` or `full`, see Section 5.5).
 - Number of CPU threads, maximum memory-bank size (`max_bank_gb`), and maximum fitting time (`max_fit_minutes`).
+- Index backend (`exact` or `tiled`), the anomaly-map refinement filter (`gaussian` or `guided`) with its radius and regularization, and the `multiscale` switch (Section 5.3).
 - Evaluation resolution for pixel metrics.
 - Output directory.
 - Device selection.
@@ -611,7 +619,9 @@ inspectai/
 │       │   ├── classical.py
 │       │   ├── features.py
 │       │   ├── gaussian.py
-│       │   └── patchcore.py
+│       │   ├── patchcore.py
+│       │   ├── quantize.py
+│       │   └── refine.py
 │       ├── inference/
 │       │   ├── __init__.py
 │       │   └── predictor.py
@@ -628,7 +638,8 @@ inspectai/
 │   ├── validate_dataset.py
 │   ├── fit_model.py
 │   ├── evaluate_model.py
-│   └── run_demo.py
+│   ├── run_demo.py
+│   └── benchmark_latency.py
 ├── tests/
 │   ├── unit/
 │   ├── integration/
@@ -643,7 +654,8 @@ inspectai/
 └── docs/
     ├── architecture.md
     ├── evaluation.md
-    └── limitations.md
+    ├── limitations.md
+    └── benchmarks.md
 ```
 
 The tree root is the repository root, `C:\dev\inspectai` (Section 9.2). The `data/`, `artifacts/`, and `reports/` folders in the repository contain only a `README.md` that explains where the real locations are (`INSPECTAI_DATA_ROOT`, `INSPECTAI_ARTIFACT_DIR`, `INSPECTAI_REPORT_DIR`). Datasets, artifacts, and generated reports are not stored in the repository.
@@ -669,6 +681,8 @@ python scripts/fetch_weights.py --backbone resnet18
 python scripts/validate_dataset.py
 python scripts/fit_model.py --model patchcore --category cashew --profile dev
 python scripts/evaluate_model.py --model patchcore --category cashew
+python scripts/fit_model.py --model patchcore --category cashew --profile dev --index-backend tiled
+python scripts/benchmark_latency.py --category cashew --variants fp32 tiled static
 streamlit run app.py
 pytest
 ```

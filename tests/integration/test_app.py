@@ -14,6 +14,7 @@ from make_world import FAKE_WEIGHTS, World
 from streamlit.testing.v1 import AppTest
 
 from inspectai.artifacts.store import TENSORS
+from inspectai.data.dataset import VisADataset
 from inspectai.inference.predictor import (
     NOT_A_PROBABILITY,
     STATUS_ANOMALY,
@@ -454,6 +455,130 @@ def test_the_dashboard_confusion_matrix_matches_the_saved_summary(app_env: World
     assert int(matrix.loc[0, "Predicted anomaly"]) == cm["fp"]
 
 
+ERROR_MODELS = {
+    "A classical": "classical",
+    "B Gaussian dev": "gaussian",
+    "C PatchCore-inspired dev": "patchcore",
+}
+
+
+def _expected_mistakes(world: World, folder: str, category: str = "pipe_fryum") -> dict[str, list]:
+    rows = list(_predictions(world, folder, category).values())
+    flagged = [float(r["score"]) > float(r["threshold"]) for r in rows]
+    pairs = list(zip(rows, flagged, strict=True))
+    return {
+        "false_positive": [r for r, f in pairs if r["label"] == "0" and f],
+        "false_negative": [r for r, f in pairs if r["label"] == "1" and not f],
+    }
+
+
+def _error_table(at: AppTest):  # type: ignore[no-untyped-def]
+    tables = [d.value for d in at.dataframe if "Score / threshold" in d.value.columns]
+    return tables[0] if tables else None
+
+
+def test_the_dashboard_error_analysis_lists_the_saved_mistakes_with_their_images(
+    app_env: World,
+) -> None:
+    at = _page("dashboard_page").run()
+    at.selectbox(key="dashboard_category").set_value("pipe_fryum").run()
+    assert not at.exception and "Error analysis" in _texts(at)
+    shown_a_sample = False
+    for label, folder in ERROR_MODELS.items():
+        at.selectbox(key="dashboard_error_model").set_value(label).run()
+        expected = _expected_mistakes(app_env, folder)
+        for kind, rows in expected.items():
+            at.radio(key="dashboard_error_kind").set_value(kind).run()
+            assert not at.exception, (label, kind)
+            table = _error_table(at)
+            if not rows:
+                assert table is None and any("no mistakes" in s.value for s in at.success)
+                continue
+            assert len(table) == len(rows), (label, kind)
+            assert sorted(table["Score"]) == sorted(round(float(r["score"]), 3) for r in rows)
+            truth = "normal" if kind == "false_positive" else "anomalous"
+            assert set(table["Ground truth"]) == {truth}
+            # the first sample: score, threshold and truth side by side with the images
+            at.selectbox(key="dashboard_error_sample").select_index(0).run()
+            assert not at.exception
+            metrics = {m.label: str(m.value) for m in at.metric}
+            first = table.iloc[0]
+            assert metrics["Anomaly score"] == f"{first['Score']:.3f}"
+            assert metrics["Calibrated threshold"] == f"{first['Threshold']:.3f}"
+            assert metrics["Ground truth"] == first["Ground truth"]
+            decision = "Anomaly detected" if kind == "false_positive" else "Normal"
+            assert metrics["Model decision"] == decision
+            images = len(at.get("image"))
+            assert images >= (3 if kind == "false_negative" else 2)  # + defect mask
+            shown_a_sample = True
+            _no_leaks(at, app_env.reports, app_env.artifacts, "Data/Images", "Data\\Images")
+    assert shown_a_sample  # pipe_fryum / Gaussian has three false positives
+
+
+def _fake_mistakes(image_rel: str, label: int) -> object:
+    entry = {
+        "image": image_rel,
+        "name": image_rel.split("/", 2)[-1].split("/", 1)[-1],
+        "label": label,
+        "score": 0.5 if label else 9.0,
+        "threshold": 4.0,
+        "ratio": 0.125 if label else 2.25,
+    }
+    return lambda run: {
+        "false_positive": [] if label else [entry],
+        "false_negative": [entry] if label else [],
+    }
+
+
+def test_a_missed_defect_is_shown_with_its_overlay_and_ground_truth_mask(
+    app_env: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dataset = VisADataset(app_env.synthetic.split_csv, app_env.synthetic.images_root)
+    anomalous = next(s for s in dataset.get_samples("cashew", split="test") if s.is_anomalous)
+    monkeypatch.setattr(
+        "inspectai.ui.dashboard_page.misclassified_images", _fake_mistakes(anomalous.image_rel, 1)
+    )
+    at = _page("dashboard_page").run()
+    at.radio(key="dashboard_error_kind").set_value("false_negative").run()
+    at.selectbox(key="dashboard_error_sample").select_index(0).run()
+    assert not at.exception and not at.error
+    metrics = {m.label: str(m.value) for m in at.metric}
+    assert metrics["Ground truth"] == "anomalous" and metrics["Model decision"] == "Normal"
+    assert metrics["Anomaly score"] == "0.500" and metrics["Calibrated threshold"] == "4.000"
+    assert len(at.get("image")) >= 3  # original, overlay, ground-truth mask
+    _no_leaks(at, app_env.reports, app_env.artifacts, "Data/Images")
+
+
+def test_an_image_the_split_file_does_not_list_is_never_opened(
+    app_env: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "inspectai.ui.dashboard_page.misclassified_images",
+        _fake_mistakes("../../outside/secret.JPG", 1),
+    )
+    at = _page("dashboard_page").run()
+    at.radio(key="dashboard_error_kind").set_value("false_negative").run()
+    at.selectbox(key="dashboard_error_sample").select_index(0).run()
+    assert not at.exception
+    assert any("not listed in the local dataset" in w.value for w in at.warning)
+    _no_leaks(at, app_env.reports)
+
+
+def test_a_tampered_prediction_path_invalidates_the_category_instead_of_being_opened(
+    private_env: World,
+) -> None:
+    path = private_env.reports / "gaussian" / "pipe_fryum" / "predictions.csv"
+    original = path.read_text(encoding="utf-8")
+    target = _expected_mistakes(private_env, "gaussian")["false_positive"][0]["image"]
+    path.write_text(original.replace(target, "../../outside/secret.JPG"), encoding="utf-8")
+    at = _page("dashboard_page").run()
+    at.selectbox(key="dashboard_category").set_value("pipe_fryum").run()
+    assert not at.exception
+    assert any("did not pass validation" in e.value for e in at.error)
+    assert _error_table(at) is None
+    _no_leaks(at, private_env.reports)
+
+
 def test_the_dashboard_without_results_shows_no_metrics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -598,3 +723,21 @@ def test_the_hosted_app_inspects_with_model_c_by_default_and_keeps_model_a_optio
     assert len(at.metric) == 3 and float(at.metric[0].value) > 0
     assert "C PatchCore-inspired dev" in _texts(at)
     _no_leaks(at, bundle)
+
+
+def test_the_hosted_error_analysis_shows_scores_but_no_images(
+    hosted_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "inspectai.ui.dashboard_page.misclassified_images",
+        _fake_mistakes("cashew/Data/Images/Normal/0001.JPG", 0),
+    )
+    at = _page("dashboard_page").run()
+    assert not at.exception and "Error analysis" in _texts(at)
+    before = len(at.get("image"))
+    at.radio(key="dashboard_error_kind").set_value("false_positive").run()
+    assert not at.exception and _error_table(at) is not None
+    at.selectbox(key="dashboard_error_sample").select_index(0).run()
+    assert any("not part of this deployment" in i.value for i in at.info)
+    assert len(at.get("image")) == before  # no dataset image was shown
+    _no_leaks(at, hosted_env, "Data/Images")
