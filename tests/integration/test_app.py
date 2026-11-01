@@ -444,6 +444,42 @@ def test_the_dashboard_shows_validated_metrics_from_the_report_files(app_env: Wo
     _no_leaks(at, app_env.reports, app_env.artifacts)
 
 
+def test_the_dashboard_chart_carries_the_full_model_names(app_env: World) -> None:
+    at = _page("dashboard_page").run()
+    charts = at.get("vega_lite_chart")
+    assert len(charts) == 1
+    spec = json.loads(charts[0].proto.spec)
+    assert spec["encoding"]["y"]["axis"]["labelLimit"] >= 300
+    # Streamlit ships the rows separately; the spec still lists every full model name in order
+    assert spec["encoding"]["y"]["sort"] == [
+        "A classical",
+        "B Gaussian dev",
+        "C PatchCore-inspired dev",
+    ]
+
+
+def test_tiled_runs_appear_in_the_performance_table_when_their_reports_exist(
+    private_env: World,
+) -> None:
+    summary = json.loads(
+        (private_env.reports / "patchcore" / "cashew" / "summary.json").read_text("utf-8")
+    )
+    summary["performance"] = {**summary["performance"], "fit_seconds": 50.0}
+    folder = private_env.reports / "patchcore-tiled" / "cashew"
+    folder.mkdir(parents=True)
+    (folder / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    at = _page("dashboard_page").run()
+    assert not at.exception and not at.error
+    performance = next(d.value for d in at.dataframe if "Fit time" in d.value.columns)
+    assert list(performance["Model"])[-1] == "C PatchCore-inspired dev (tiled)"
+    assert performance.iloc[-1]["Fit time"] == "50.0 s"
+    assert "None" not in performance.to_string()
+    assert "(tiled)" in _texts(at)  # the caption explains the extra row
+    metrics = at.dataframe[0].value
+    assert not any("tiled" in model for model in metrics["Model"])
+    _no_leaks(at, private_env.reports, private_env.artifacts)
+
+
 def test_the_dashboard_confusion_matrix_matches_the_saved_summary(app_env: World) -> None:
     at = _page("dashboard_page").run()
     at.selectbox(key="dashboard_confusion_model").set_value("B Gaussian dev").run()

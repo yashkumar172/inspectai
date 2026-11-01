@@ -13,6 +13,7 @@ from inspectai.evaluation.dashboard import (
     FALSE_NEGATIVE,
     FALSE_POSITIVE,
     ExampleImage,
+    _perf_text,
     confusion_matrix,
     display_name,
     load_category,
@@ -241,3 +242,95 @@ def test_the_mistakes_are_ordered_most_clear_cut_first() -> None:
 )
 def test_the_display_name_keeps_only_the_last_two_path_parts(image_rel: str, expected: str) -> None:
     assert display_name(image_rel) == expected
+
+
+# ----- tiled-backend runs in the performance table ---------------------------------------------
+
+
+def _write_tiled(reports: Path, category: str = "cashew", **changes: object) -> Path:
+    """A `patchcore-tiled` report derived from the Model C one, with faster (made-up) timings."""
+    source = json.loads((reports / "patchcore" / category / "summary.json").read_text("utf-8"))
+    source["performance"] = {
+        **source["performance"],
+        "fit_seconds": 123.4,
+        "latency_seconds_mean": 0.0421,
+        "latency_seconds_max": 0.05,
+        "images_per_second": 23.75,
+    }
+    source.update(changes)
+    folder = reports / "patchcore-tiled" / category
+    folder.mkdir(parents=True)
+    (folder / "summary.json").write_text(json.dumps(source), encoding="utf-8")
+    return folder
+
+
+def test_a_matching_tiled_run_adds_a_performance_row_but_no_metric_row(
+    world: World, reports: Path
+) -> None:
+    _write_tiled(reports)
+    cashew = load_results(reports, world.artifacts)["cashew"]
+    assert [t.label for t in cashew.tiled] == ["C PatchCore-inspired dev (tiled)"]
+    rows = performance_rows(cashew)
+    assert [r["Model"] for r in rows][-1] == "C PatchCore-inspired dev (tiled)"
+    tiled = rows[-1]
+    assert tiled["Fit time"] == "123.4 s" and tiled["Latency (mean)"] == "42 ms"
+    exact = next(r for r in rows if r["Model"] == "C PatchCore-inspired dev")
+    assert exact["Fit time"] != tiled["Fit time"]  # the default row is untouched
+    # a speed measurement of the same model, not another model in the comparison
+    assert all("tiled" not in r["Model"] for r in metric_rows(cashew))
+    assert all("tiled" not in d["a"] + d["b"] for d in cashew.paired)
+
+
+def test_without_tiled_runs_the_table_is_exactly_the_default_runs(
+    world: World, reports: Path
+) -> None:
+    cashew = load_results(reports, world.artifacts)["cashew"]
+    assert cashew.tiled == ()
+    assert len(performance_rows(cashew)) == len(cashew.records)
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        {"category": "pipe_fryum"},  # a report for another category
+        {"model": "gaussian"},  # not Model C
+        {"split": {"file_list_sha256": {"fit": "0" * 64}}},  # other splits than the default run
+        {"performance": None},  # nothing to show
+        {"performance": "fast"},
+    ],
+)
+def test_a_tiled_run_that_does_not_match_is_ignored_without_error(
+    world: World, reports: Path, damage: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    _write_tiled(reports, **damage)
+    with caplog.at_level(logging.WARNING):
+        cashew = load_results(reports, world.artifacts)["cashew"]
+    assert cashew.valid and cashew.tiled == ()
+    assert len(performance_rows(cashew)) == len(cashew.records)
+
+
+def test_a_malformed_tiled_summary_is_ignored_without_error(world: World, reports: Path) -> None:
+    folder = _write_tiled(reports)
+    (folder / "summary.json").write_text("{ not json", encoding="utf-8")
+    cashew = load_results(reports, world.artifacts)["cashew"]
+    assert cashew.valid and cashew.tiled == ()
+
+
+def test_missing_performance_fields_are_shown_as_a_dash_never_as_none(
+    world: World, reports: Path
+) -> None:
+    folder = _write_tiled(reports)
+    summary = json.loads((folder / "summary.json").read_text("utf-8"))
+    summary["performance"] = {"fit_seconds": None, "n_fit_images": None, "images_per_second": "x"}
+    (folder / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+    tiled = performance_rows(load_results(reports, world.artifacts)["cashew"])[-1]
+    assert all(value != "None" and value is not None for value in tiled.values())
+    assert tiled["Fit time"] == "-" and tiled["Fit images"] == "-"
+    assert tiled["Images / second"] == "-" and tiled["Latency (mean)"] == "-"
+
+
+@pytest.mark.parametrize("value", [None, "12", True, float("nan")])
+def test_perf_text_only_formats_real_numbers(value: object) -> None:
+    text = _perf_text({"k": value}, "k", 1.0, " s")
+    assert text == "-" or text == "nan s"  # NaN is a float; everything else is a dash
+    assert "None" not in text

@@ -184,7 +184,7 @@ under `runtime`, so it never makes an artifact stale):
   `o` only if `d(c, o) < 2 d(x, o)` (triangle inequality), so only the few percent of vectors passing
   that test are re-measured; the test needs the distances from `c` to the selected centers
   (`k x 128` per step, not `N x 128`). It selects exactly the same indices (verified at full scale)
-  and is about 3.5 times faster (see [benchmarks.md](benchmarks.md)). Search uses `addmm` tiles of
+  and is 2.5 to 5 times faster, depending on the category (see [benchmarks.md](benchmarks.md)). Search uses `addmm` tiles of
   `-2 q.b + |b|^2` and agrees with `exact` to float32 rounding.
 
 Approximate indexes (HNSW) are deliberately not offered: they would add a dependency and make the

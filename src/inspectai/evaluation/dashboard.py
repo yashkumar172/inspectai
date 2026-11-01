@@ -9,6 +9,7 @@ metrics at all; the technical detail is kept in `detail` for the server log.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -34,6 +35,26 @@ _SPLIT_LABELS = {
 
 
 @dataclass(frozen=True)
+class TiledRun:
+    """A Model C run made with `--index-backend tiled`, shown only in the performance table.
+
+    It has its own report folder (for example `patchcore-tiled/<category>`). The `tiled` backend
+    selects the same coreset as the default one, so the run is a speed measurement of the same
+    model, not a different model: it is not part of the metric comparison.
+    """
+
+    label: str
+    summary: dict
+
+
+# (report folder of the tiled run, label, report folder of the default run it must match)
+TILED_RUNS = (
+    ("patchcore-tiled", "C PatchCore-inspired dev (tiled)", "patchcore"),
+    ("patchcore-full-tiled", "C PatchCore-inspired full (tiled)", "patchcore-full"),
+)
+
+
+@dataclass(frozen=True)
 class ExampleImage:
     """A saved representative-prediction figure."""
 
@@ -51,6 +72,7 @@ class CategoryResults:
     paired: tuple[dict, ...] = ()
     not_measured: tuple[str, ...] = ()
     examples: tuple[ExampleImage, ...] = ()
+    tiled: tuple[TiledRun, ...] = ()  # speed measurements with the tiled index backend
     problem: str | None = None  # safe to show: contains no paths
     detail: str | None = field(default=None, repr=False)  # for logs only
 
@@ -83,6 +105,38 @@ def _examples(report_root: Path, category: str, runs: tuple[Run, ...]) -> tuple[
         for path in sorted(folder.glob("*.png")) if folder.is_dir() else []:
             caption = f"{run.spec.label}: {path.stem.replace('_', ' ')}"
             found.append(ExampleImage(caption, path))
+    return tuple(found)
+
+
+def load_tiled_runs(
+    report_root: Path, category: str, runs: tuple[Run, ...]
+) -> tuple[TiledRun, ...]:
+    """The tiled-backend runs of a category that are usable next to the default runs.
+
+    A tiled run is used only if its summary is readable, is for this category and for Model C,
+    records the `tiled` backend or at least a performance section, and was made on the very same
+    splits as the default run it accompanies (compared by the split file hashes). Anything else is
+    skipped with a log entry and never raises: the table then simply has no tiled row.
+    """
+    found: list[TiledRun] = []
+    by_folder = {run.spec.report_folder: run for run in runs}
+    for folder, label, default_folder in TILED_RUNS:
+        path = Path(report_root) / folder / category / "summary.json"
+        default = by_folder.get(default_folder)
+        if default is None or not path.is_file():
+            continue
+        try:
+            summary = json.loads(path.read_text(encoding="utf-8"))
+            same_model = summary.get("model") == "patchcore" and summary.get("category") == category
+            same_split = (
+                summary["split"]["file_list_sha256"] == default.summary["split"]["file_list_sha256"]
+            )
+            if not (same_model and same_split and isinstance(summary.get("performance"), dict)):
+                raise ValueError("not a matching Model C run on the same splits")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            logger.warning("Ignoring the tiled run %s/%s: %r", folder, category, exc)
+            continue
+        found.append(TiledRun(label, summary))
     return tuple(found)
 
 
@@ -134,6 +188,7 @@ def load_category(
         paired=tuple(paired),
         not_measured=tuple(str(m) for m in missing),
         examples=_examples(report_root, category, run_tuple),
+        tiled=load_tiled_runs(report_root, category, run_tuple),
     )
 
 
@@ -227,18 +282,24 @@ def metric_rows(results: CategoryResults) -> list[dict[str, object]]:
 
 def _perf_text(perf: dict, key: str, scale: float = 1.0, unit: str = "", digits: int = 1) -> str:
     value = perf.get(key)
-    return "-" if value is None else f"{value * scale:.{digits}f}{unit}"
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return "-"  # missing, null, or not a number: never shown as 'None'
+    return f"{value * scale:.{digits}f}{unit}"
 
 
 def performance_rows(results: CategoryResults) -> list[dict[str, object]]:
     """Display rows for fit time, latency, and memory as measured by the evaluation runs."""
+    entries = [(record["label"], record["performance"]) for record in results.records]
+    for tiled in results.tiled:
+        entries.append((tiled.label, tiled.summary["performance"]))
     rows: list[dict[str, object]] = []
-    for record in results.records:
-        perf = record["performance"]
+    for label, perf in entries:
         rows.append(
             {
-                "Model": record["label"],
-                "Fit images": perf.get("n_fit_images", "-"),
+                "Model": label,
+                "Fit images": perf.get("n_fit_images")
+                if perf.get("n_fit_images") is not None
+                else "-",
                 "Fit time": _perf_text(perf, "fit_seconds", 1.0, " s"),
                 "Latency (mean)": _perf_text(perf, "latency_seconds_mean", 1000.0, " ms", 0),
                 "Latency (max)": _perf_text(perf, "latency_seconds_max", 1000.0, " ms", 0),

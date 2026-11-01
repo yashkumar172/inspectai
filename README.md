@@ -55,8 +55,8 @@ Python 3.12 · PyTorch 2.14 (CPU) and torchvision 0.29 (ImageNet-1k ResNet-18 an
 |---|---|
 | Machine used for every measurement | AMD Ryzen 5 5500U (6 cores / 12 threads), 16 GB RAM, no GPU, Windows 11, plugged in, **Balanced** power plan |
 | Python / PyTorch | 3.12.2 / 2.14.1+cpu |
-| Fit time (400-408 images) | classical about 8 s · Model B 15-66 s · Model C about 10-12 minutes |
-| Prediction latency per image | classical about 14 ms · Model B 34-130 ms · Model C 0.2-0.65 s |
+| Fit time (400-408 images) | classical about 8 s · Model B 15-66 s · Model C about 10-12 minutes (`exact`, the default) · about 2.2-4.5 minutes (`--index-backend tiled`, measured 133-272 s on seven categories) |
+| Prediction latency per image | classical about 14 ms · Model B 34-130 ms · Model C 0.2-0.65 s (`exact`; `dev` about 0.2 s, `full` up to 0.65 s) · 136-169 ms (`tiled`, `dev`) |
 | Peak memory while fitting | 0.4 GB (classical) · 0.74-1.04 GB (Model B) · 1.2 GB (Model C `dev`) · 2.9 GB (Model C `full`) |
 | Synthetic end-to-end demo | about 13 s |
 | Default test suite | about 2 minutes |
@@ -384,7 +384,7 @@ python scripts/fit_model.py --model patchcore --category pcb1 --profile dev --ma
 python scripts/benchmark_latency.py --category cashew --variants fp32 tiled dynamic static
 ```
 
-- `--index-backend tiled` selects **the same coreset 3.5x to 5x faster** (cashew 662 s to 189 s; the real candle / pcb1 / pcb2 fits 596 s to about 120 s, whole fit about 610 s to about 140 s) with a triangle-inequality prune; the stored banks are byte-identical to the default `exact` ones. Its nearest-neighbor kernel is exact to float32 rounding and cut Model C's median latency from 209 ms to 142 ms. An approximate HNSW index is deliberately not offered.
+- `--index-backend tiled` selects **the same coreset 2.5x to 5x faster** (measured on all seven categories: whole `dev` fit about 10-11 minutes to 2.2-4.5 minutes, coreset step 2.5x to 5.1x) with a triangle-inequality prune; the stored banks are byte-identical to the default `exact` ones in all seven and the image AUROC is unchanged. Its nearest-neighbor kernel is exact to float32 rounding and cut Model C's prediction time from 196-208 ms to 136-169 ms (cashew benchmark: median 209 ms to 142 ms). The dashboard's performance table shows these as extra `(tiled)` rows when `patchcore-tiled` reports exist. An approximate HNSW index is deliberately not offered.
 - `--refinement-filter guided` (edge-aware smoothing of the anomaly map) and `--multiscale` (adds `layer1` features, pooled to the `layer2` grid) were evaluated on `candle`, `pcb1`, and `pcb2` to raise pixel IoU / Dice. **They did not**: IoU / Dice were unchanged or slightly lower (mean IoU 0.051 for the baseline, 0.048 with the guided filter, 0.051 with `layer1`). Image AUROC rose a little (mean 0.898 to 0.911 with `layer1`), but the intervals overlap, so that is not demonstrated. Both stay off by default.
 - INT8: `quantize_dynamic` converts nothing in a ResNet feature trunk (no convolution kernel), and static INT8 gives Model B a 14% median speedup for -0.004 AUROC but gives Model C no speedup and -0.048 AUROC. Not recommended for Model C.
 

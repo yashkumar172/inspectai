@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 
+import altair as alt
+import pandas as pd
 import streamlit as st
 
 from inspectai.config import Paths
@@ -34,6 +36,10 @@ from inspectai.ui.common import (
 )
 
 logger = logging.getLogger("inspectai.app")
+
+# Wide enough for the longest model name ("C PatchCore-inspired full (tiled)") at the chart's
+# default font; the default axis label limit cut names off ("C PatchCore-insp...").
+AXIS_LABEL_LIMIT_PX = 360
 
 KIND_LABELS = {
     FALSE_POSITIVE: "False positives (normal images scored above the threshold)",
@@ -66,6 +72,28 @@ def render() -> None:
     )
     _category(results[category], env.paths)
     st.caption(VISA_ATTRIBUTION)
+
+
+def auroc_chart(auroc: dict[str, float]) -> alt.Chart:
+    """Horizontal bars of image AUROC, with the full model names on the Y axis.
+
+    The AUROC scale is fixed to 0..1 so that bar lengths can be compared across categories.
+    """
+    frame = pd.DataFrame({"Model": list(auroc), "Image AUROC": list(auroc.values())})
+    return (
+        alt.Chart(frame)
+        .mark_bar()
+        .encode(
+            x=alt.X("Image AUROC:Q", scale=alt.Scale(domain=[0, 1])),
+            y=alt.Y(
+                "Model:N",
+                sort=list(auroc),
+                title=None,
+                axis=alt.Axis(labelLimit=AXIS_LABEL_LIMIT_PX),
+            ),
+            tooltip=["Model", alt.Tooltip("Image AUROC:Q", format=".3f")],
+        )
+    )
 
 
 def _category(result: CategoryResults, paths: Paths) -> None:
@@ -105,7 +133,7 @@ def _category(result: CategoryResults, paths: Paths) -> None:
         if r["metrics"]["image"]["auroc"] is not None
     }
     if auroc:
-        st.bar_chart(auroc, y_label="Image AUROC", x_label="Model", horizontal=True)
+        st.altair_chart(auroc_chart(auroc), width="stretch")
 
     if result.paired:
         st.subheader("Paired AUROC differences")
@@ -160,6 +188,12 @@ def _category(result: CategoryResults, paths: Paths) -> None:
     st.caption(
         "Measured on one machine during the evaluation runs; latency is the model's prediction "
         "time per image (image decoding excluded)."
+        + (
+            " Rows marked (tiled) are the same model fitted and scored with the faster "
+            "`--index-backend tiled` kernels (same memory bank; see docs/benchmarks.md)."
+            if result.tiled
+            else ""
+        )
     )
 
     if result.examples:

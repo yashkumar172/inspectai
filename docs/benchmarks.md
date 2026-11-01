@@ -29,21 +29,44 @@ measurements below), and the test needs `c`'s distances to the selected centers 
 | Selecting 31,752 of 317,520 vectors (cashew `dev`, 384 dims), standalone | 662 s | 189 s | 3.5x |
 | Same, 15,680 of 156,800 vectors (half the images) | 154 s | 47 s | 3.3x |
 | Same, 3,136 of 31,360 vectors | 6.7 s | 2.9 s | 2.3x |
-| Coreset step inside real `fit_model.py` runs (31,360 of 313,600 vectors; candle, pcb1, pcb2) | 596 / 596 / 596 s | 124 / 118 / 125 s | 4.8x to 5.1x |
-| Whole `fit_model.py` run (same three) | 609 / 610 / 609 s | 139 / 134 / 142 s | about 4.4x |
+| Coreset step inside real `fit_model.py` runs, all seven categories (table below) | 596 to 635 s | 117 to 252 s | 2.5x to 5.1x |
+| Whole `fit_model.py` run, all seven categories (table below) | 609 to 649 s | 133 to 272 s | 2.4x to 4.6x |
 | Peak working set during selection | 1.07 GB | 1.05 GB | unchanged |
 
 The speedup grows with the number of vectors because the scan's cost per step is proportional to N, while
-the pruned step's cost is dominated by the few vectors that still need re-measuring. The two sets of
-full-scale numbers differ (3.5x standalone, about 5x in the real fits) and were not measured under
-identical conditions (different categories, and the standalone run overlapped with light editing work);
-treat "3.5x to 5x" as the honest range. A per-step profile of the pruned loop (N = 78,400) is spread out
+the pruned step's cost is dominated by the few vectors that still need re-measuring. The standalone
+cashew benchmark (3.5x) and the real fits (2.5x to 5.1x, table below) were measured separately, and the
+standalone run overlapped with light editing work. A per-step profile of the pruned loop (N = 78,400) is spread out
 (candidate update 46%, center distances 19%, argmax 18%, gather 11%, nonzero 6%), so no single further
 hot spot was found.
 
+**All seven categories (`dev`, pure `tiled` runs, machine otherwise idle).** Each category was fitted and
+evaluated twice, once with the default `exact` backend (the numbers in the README) and once with
+`--index-backend tiled` (`patchcore-tiled/<category>` in the reports folder). Candle, pcb1 and pcb2 used
+the 400-image fit subset. In all seven the stored `tensors.safetensors` is byte-identical between the two
+backends and the image AUROC is identical to four decimals.
+
+| Category | Coreset exact | Coreset tiled | Speedup | Fit exact | Fit tiled | Speedup | Latency exact | Latency tiled | Image AUROC (both) |
+|---|---|---|---|---|---|---|---|---|---|
+| cashew | 635 s | 204 s | 3.1x | 649 s | 225 s | 2.9x | 205 ms | 169 ms | 0.9546 |
+| pipe_fryum | 621 s | 160 s | 3.9x | 635 s | 180 s | 3.5x | 196 ms | 156 ms | 0.9824 |
+| chewinggum | 625 s | 252 s | 2.5x | 639 s | 272 s | 2.4x | 199 ms | 164 ms | 0.9684 |
+| fryum | 630 s | 124 s | 5.1x | 644 s | 144 s | 4.5x | 208 ms | 136 ms | 0.8642 |
+| candle | 596 s | 117 s | 5.1x | 609 s | 133 s | 4.6x | 198 ms | 140 ms | 0.9134 |
+| pcb1 | 596 s | 120 s | 5.0x | 610 s | 136 s | 4.5x | 198 ms | 138 ms | 0.8833 |
+| pcb2 | 596 s | 129 s | 4.6x | 609 s | 145 s | 4.2x | 198 ms | 138 ms | 0.8968 |
+
+Latency is the mean of `model.predict` over the 150 or 200 test images during evaluation (decoding
+excluded). So on this machine a Model C `dev` fit takes **2.2 to 4.5 minutes with `tiled` against about
+10 to 11 minutes with `exact`** (2.4x to 4.6x), the coreset step is 2.5x to 5.1x faster, and prediction
+takes 136 to 169 ms instead of 196 to 208 ms. The speedup depends on the category (chewinggum gains
+least, fryum and the three added categories most) because how many vectors the pruning can skip depends
+on how the features cluster. The first category measured (cashew) was also run once while other work was
+using the CPU (coreset 219 s); that run was discarded and repeated on an idle machine.
+
 **Identical results.** The selected indices are identical at full scale (cashew, 31,752 of them), and the
-stored `tensors.safetensors` of the `tiled` fits are byte for byte equal to the `exact` ones for candle,
-pcb1 and pcb2 (compared by SHA-256). A unit test compares both backends with a brute-force greedy
+stored `tensors.safetensors` of the `tiled` fits are byte for byte equal to the `exact` ones for all
+seven categories (compared by SHA-256). A unit test compares both backends with a brute-force greedy
 implementation that shares no update logic with them.
 
 **Nearest-neighbor search.** The `tiled` kernel computes `-2 q.b + |b|^2` per bank tile with one `addmm`,
