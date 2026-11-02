@@ -75,6 +75,28 @@ def mask_to_rgb(mask: NDArray) -> ImageArray:
     return ensure_three_channels((mask != 0).astype(np.uint8) * 255)
 
 
+def outline_mask(
+    image: ImageArray, mask: NDArray, color: tuple[int, int, int] = (255, 255, 255)
+) -> ImageArray:
+    """A copy of `image` with the outline of the binary `mask` drawn on it.
+
+    A mask of another size is resized (nearest neighbor) to the image first. An empty mask
+    leaves the image unchanged.
+    """
+    if image.ndim != 3 or image.shape[2] != 3:
+        raise ImageError(f"Expected an RGB image, got shape {image.shape}")
+    if mask.ndim != 2:
+        raise ImageError(f"Mask must be 2-D, got shape {mask.shape}")
+    binary = (mask != 0).astype(np.uint8)
+    height, width = image.shape[:2]
+    if binary.shape != (height, width):
+        binary = cv2.resize(binary, (width, height), interpolation=cv2.INTER_NEAREST)
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    out = np.ascontiguousarray(image.copy())
+    cv2.drawContours(out, contours, -1, color, max(2, round(min(height, width) / 200)))
+    return out
+
+
 def _label(panel: ImageArray, text: str) -> ImageArray:
     out = panel.copy()
     cv2.putText(out, text, (6, 18), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 3, cv2.LINE_AA)

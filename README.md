@@ -1,25 +1,25 @@
 # InspectAI — Industrial Visual Anomaly Detection
 
-InspectAI finds defective products in photographs, shows where the defect is, and reports how far an image is from normal. It learns **only from normal images** of each product and is evaluated on the VisA benchmark (Amazon, ECCV 2022). Three methods are implemented and compared on identical splits: a classical OpenCV baseline (Model A), a Gaussian feature model on frozen pretrained CNN features (Model B, PaDiM-inspired), and a PatchCore-inspired nearest-neighbor model (Model C). Everything runs on an ordinary Windows CPU, and a Streamlit app serves the saved models. The full specification is in [SPEC.md](SPEC.md).
-
 **Live demo: [inspectai on Streamlit Community Cloud](https://inspectai-jg5pjtxlnfvxcxxeuhk7r9.streamlit.app/inspect)** (no dataset needed; a free Community Cloud app may take a moment to wake up if it has been idle).
+
+InspectAI finds defective products in photographs, shows where the defect is, and reports how far an image is from normal. It learns **only from normal images** of each product and is evaluated on the VisA benchmark (Amazon, ECCV 2022). Three methods are implemented and compared on identical splits: a classical OpenCV baseline (Model A), a Gaussian feature model on frozen pretrained CNN features (Model B, PaDiM-inspired), and a PatchCore-inspired nearest-neighbor model (Model C). Everything runs on an ordinary Windows CPU, and a Streamlit app serves the saved models. The full specification is in [SPEC.md](SPEC.md).
 
 ![The Inspect page flagging a defective candle: anomaly score 2.245 against a threshold of 1.981, with the heatmap and overlay locating the damaged candle](screenshots/inspect-demo.png)
 
-*Model C (PatchCore-inspired) on a candle image: the score is above the decision threshold, and the heatmap points at the damaged candle in the lower right.*
+*Model C (PatchCore-inspired) on a candle image: the score is above the decision threshold, and the heatmap points at the damaged candle in the lower right. Image: VisA (Zou et al., ECCV 2022), CC BY 4.0; resized, heatmap overlay added.*
 
-**Status:** milestones 0-7 are done, and the hosted app is deployed on Streamlit Community Cloud (Model C `dev` is the default model, Model A stays selectable). The Inspect page was inspected visually from a screenshot of the deployed app; the layout has **not** been tested across browsers or screen sizes, and the hosted app's memory use and reliability under load have not been measured. This is a research and educational prototype, not a certified quality-control system: read [Limitations](#limitations) before relying on any result.
+**Status:** complete and deployed on Streamlit Community Cloud. Model C (dev) is the default; Model A is also selectable. Tested manually on the live app: a normal and a defective candle image both received the correct decision, and the link opens publicly in a private browser window with no sign-in. Not yet tested: other browsers and screen sizes, and the host's memory use under load. This is a research and educational prototype, not a certified quality-control system; see [Limitations](#limitations).
 
 ## Key features
 
-- **Dataset tooling:** a split-file parser and validator for all 12 VisA objects, safe image and mask loading, and reproducible `fit` / `calibration_normal` / `test` splits with no test-set leakage.
-- **Three models, one harness:** classical baseline, Gaussian (Mahalanobis) model, and a PatchCore-inspired model with a memory-bank limit, a time limit, and a recorded `max_fit_images` cap.
 - **Honest evaluation:** image AUROC and AP with bootstrap confidence intervals and sample counts, pixel metrics, per-category thresholds chosen without test data, paired AUROC differences, and a comparison tool that refuses to compare runs that were not evaluated identically.
-- **Checked artifacts:** fitted models are saved as safetensors with checksums, shapes, and a stored split and threshold; they are never pickled and are verified on every load.
-- **Streamlit app:** upload or pick an image, see the decision, the score next to its threshold and the normal-score range, the heatmap and overlay, and an evaluation dashboard that validates its data before showing it.
-- **Error analysis:** an interactive false-positive / false-negative view in the dashboard to inspect each model's mistakes (images are shown only when the VisA dataset is available locally; the hosted app shows scores only).
 - **Optional faster Model C fitting:** `--index-backend tiled` selects the same coreset 2.4x to 4.6x faster per whole fit (see [Model C: speed](#model-c-speed)); the default stays `exact`.
+- **Streamlit app:** try a bundled sample image, upload your own, or pick a local test image, see the decision, the score next to its threshold and the normal-score range, the heatmap and overlay, and an evaluation dashboard that validates its data before showing it.
+- **Error analysis:** an interactive false-positive / false-negative view in the dashboard to inspect each model's mistakes (images are shown when the VisA dataset is available locally or the image is one of the bundled samples; otherwise only the scores are shown).
+- **Checked artifacts:** fitted models are saved as safetensors with checksums, shapes, and a stored split and threshold; they are never pickled and are verified on every load.
+- **Three models, one harness:** classical baseline, Gaussian (Mahalanobis) model, and a PatchCore-inspired model with a memory-bank limit, a time limit, and a recorded `max_fit_images` cap.
 - **Reproducible and tested:** fixed seeds, bit-for-bit reproducible fits, a synthetic end-to-end demo that needs no dataset or weights, and an automated test suite.
+- **Dataset tooling:** a split-file parser and validator for all 12 VisA objects, safe image and mask loading, and reproducible `fit` / `calibration_normal` / `test` splits with no test-set leakage.
 
 ## Results at a glance
 
@@ -86,7 +86,7 @@ Python 3.12 · PyTorch 2.14 (CPU) and torchvision 0.29 (ImageNet-1k ResNet-18 an
 | Prediction latency per image | classical about 14 ms · Model B 34-130 ms · Model C 0.2-0.65 s (`exact`; `dev` about 0.2 s, `full` up to 0.65 s) · 136-169 ms mean (`tiled`, `dev`) |
 | Peak memory while fitting | 0.4 GB (classical) · 0.74-1.04 GB (Model B) · 1.2 GB (Model C `dev`) · 2.9 GB (Model C `full`) |
 | Synthetic end-to-end demo | about 13 s |
-| Tests | 691 passed, 9 deselected (latest recorded run, made before commit `4a13ca0`; not re-run for the README edit) |
+| Tests | 733 passed, 9 deselected (`slow` and `needs_dataset`) |
 
 Model C `full` was not benchmarked with the `tiled` backend. The measurements are detailed in [docs/models.md](docs/models.md), [docs/benchmarks.md](docs/benchmarks.md) and [docs/environment.md](docs/environment.md).
 
@@ -111,8 +111,9 @@ Two other experiments were negative: a guided filter and an extra `layer1` featu
 - [docs/deployment.md](docs/deployment.md): the hosted bundle and what is and is not verified about the deployment.
 - [docs/dataset_setup.md](docs/dataset_setup.md): downloading, verifying and placing the VisA dataset and the pretrained weights.
 - [docs/limitations.md](docs/limitations.md): what the results do not show, what is unfinished, and future work.
-- [docs/final_report.md](docs/final_report.md): the final project report with the Definition-of-Done check.
+- [docs/final_report.md](docs/final_report.md): the final project report with the Definition-of-Done check and the milestone checklist.
 - [docs/environment.md](docs/environment.md): hardware, versions, and locations.
+- [docs/troubleshooting.md](docs/troubleshooting.md): common errors, exit codes and their fixes.
 
 ## Installation (Windows PowerShell)
 
@@ -131,7 +132,7 @@ cd C:\dev\inspectai
 pip install -e ".[dev]"
 ```
 
-`requirements-lock.txt` lists the exact package versions the project was last verified with.
+`requirements-lock.txt` lists the exact package versions the project was last verified with. Problems? See [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ### Environment variables
 
@@ -183,7 +184,7 @@ streamlit run app.py
 The app opens at `http://localhost:8501` and listens on this computer only (`.streamlit/config.toml` sets `address = "localhost"`; change it explicitly if you host the app). Pages:
 
 - **Home**: purpose, which fitted models and categories exist, how to upload an image, and the limitations.
-- **Inspect an image**: choose a model and a category, upload a JPG, JPEG, or PNG image (up to 10 MB) or, if the local VisA dataset is available, pick one of its test images. It shows the original image, the heatmap, the overlay, the decision, the score next to the category's stored threshold and the range of the normal scores, always with the warning that scores are only meaningful if the object matches the category.
+- **Inspect an image**: choose a model and a category, upload a JPG, JPEG, or PNG image (up to 10 MB) or, if the local VisA dataset is available, pick one of its test images. It shows the original image, the heatmap, the overlay, the decision, the score next to the category's stored threshold and the range of the normal scores, always with the warning that scores are only meaningful if the object matches the category. On the hosted app, **Try a sample image** is the default: it offers bundled VisA test images of the selected category (2 normal and 2 anomalous, plus a featured example) and starts on the featured candle example, so one click shows a result. After a run it shows the ground-truth label next to the decision and, for anomalous samples, the ground-truth defect outline next to the heatmap.
 - **Evaluation dashboard**: the saved evaluation metrics with the split named, a model comparison with paired differences, confusion matrices, fit time, latency and memory, and an **Error analysis** section for the false positives and false negatives of a model.
 - **About and limitations**.
 
@@ -191,13 +192,13 @@ Uploads are validated before any model runs, the decision is always the one stor
 
 ## Deployment
 
-The app is deployed on Streamlit Community Cloud from the bundle in `hosted/` (about 408 MB), which makes it run without the dataset or a weights cache: **Model C (PatchCore-inspired, `dev`) is the default inspection model**, Model A stays selectable, and Model B and Model C `full` are not included. When `INSPECTAI_DATA_ROOT` is not set, the app uses `hosted/artifacts` and `hosted/reports` automatically. `requirements.txt` installs the project with the CPU PyTorch wheels, and the project supports **Python 3.12 only** (select it in the app's Advanced settings on Community Cloud).
+The app is deployed on Streamlit Community Cloud from the bundle in `hosted/` (about 413 MB, of which the sample images are 5.5 MB), which makes it run without the dataset or a weights cache: **Model C (PatchCore-inspired, `dev`) is the default inspection model**, Model A stays selectable, and Model B and Model C `full` are not included. When `INSPECTAI_DATA_ROOT` is not set, the app uses `hosted/artifacts` and `hosted/reports` automatically. `requirements.txt` installs the project with the CPU PyTorch wheels, and the project supports **Python 3.12 only** (select it in the app's Advanced settings on Community Cloud).
 
 What has and has not been verified:
 
-- **Verified locally:** every bundled artifact passes the artifact store's integrity checks, and scores computed from the bundle alone matched the stored evaluation scores exactly for 28 test images across all seven categories.
-- **Verified on the host:** the deployed app's Inspect page was inspected from a user-provided screenshot (shown above).
-- **Not verified:** behavior in other browsers or on other screen sizes, memory use on the host and reliability under load, and whether the link opens without signing in.
+- **Verified locally:** every bundled artifact passes the artifact store's integrity checks, and scores computed from the bundle alone matched the stored evaluation scores exactly for 28 test images across all seven categories. The 29 bundled sample images are test-split images, and their scores from the bundled Model C `dev` and Model A artifacts equal the saved evaluation scores (relative tolerance 1e-5).
+- **Tested manually on the live app** with normal and defective images; the link opens publicly without signing in.
+- **Not verified:** behavior in other browsers or on other screen sizes, and memory use on the host and reliability under load.
 
 Details and the bundle contents are in [docs/deployment.md](docs/deployment.md).
 
@@ -208,33 +209,9 @@ The full list is in [docs/limitations.md](docs/limitations.md). The most importa
 - Seven of the twelve VisA objects were evaluated, with 50-100 normal and 100 anomalous test images each; one seed and one machine. Read the confidence intervals. `candle`, `pcb1`, and `pcb2` were fitted on 400 of about 810 fit images (`--max-fit-images`).
 - Model C is better than Model B in most but not all categories, and the `full` profile is not always better than `dev`; the ranking depends on the category. The classical baseline is competitive on `pcb2` (image AUROC 0.919, the highest of the five configurations there) and beats Model B on it, although it localizes defects poorly.
 - Thresholds come from 45-90 held-out normal images, so they are conservative: few false alarms, but moderate recall (0.06 to 0.90 by model and category). Compare models by AUROC and paired intervals, not by F1.
-- Defect localisation is coarse (pixel IoU 0.00 to 0.30), and small or faint defects are often missed. The guided-filter and `layer1` refinements did not improve it.
+- Defect localization is coarse (pixel IoU 0.00 to 0.30), and small or faint defects are often missed. The guided-filter and `layer1` refinements did not improve it.
 - An anomaly score is not a probability, and scores are only meaningful if the object matches the selected category.
 - Not done: cross-browser and screen-size testing of the app, measurement of the hosted app's memory use and reliability under load, a tiled-backend benchmark for Model C `full`, the other five VisA objects, fits of the added categories on all of their fit images, a hosted float16 profile, and benchmarking on the High-performance power plan.
-
-## Milestone checklist
-
-- [x] Milestone 0 — Repository inspection and setup
-- [x] Milestone 1 — Dataset and preprocessing (real VisA validates with 0 errors)
-- [x] Milestone 2 — Evaluation harness and classical baseline
-- [x] Milestone 3 — Feature extractor, Model B, and artifact store
-- [x] Milestone 4 — PatchCore-inspired model
-- [x] Milestone 5 — Comparison reports and additional categories (seven categories measured with all five configurations)
-- [x] Milestone 6 — Streamlit application (tested with `AppTest` and real artifacts; the deployed app was inspected from a screenshot, not tested across browsers)
-- [x] Milestone 7 — Final verification and delivery (see docs/final_report.md; limitations are disclosed above)
-- [x] After the milestones — hosted Model C bundle deployed on Streamlit Community Cloud, optional `tiled` coreset backend, latency / INT8 benchmark, and the error-analysis dashboard
-
-## Troubleshooting
-
-- **`import inspectai` fails:** activate the virtual environment and run `pip install -e ".[dev]"` from `C:\dev\inspectai`.
-- **"libiomp5md.dll already initialized":** fix duplicate OpenMP runtimes first. Use `KMP_DUPLICATE_LIB_OK=TRUE` only as a last resort.
-- **Environment variables not visible:** open a new terminal after setting them.
-- **`WeightsNotFoundError` (exit code 4):** run `python scripts/fetch_weights.py --backbone resnet18` once; the weights are cached under `TORCH_HOME`.
-- **"The memory bank would need about N GB ... above max_bank_gb" (exit code 2):** lower `--max-fit-images` (a recorded, seeded subset), use the `dev` profile, or raise `--max-bank-gb` if you have the RAM.
-- **"Coreset selection exceeded the time limit" / "exceeded max_fit_minutes" (exit code 2):** use `--max-fit-images` or a smaller `--coreset-ratio`, or raise `--max-fit-minutes` and wait (a default fit takes about 11 minutes on the reference laptop; `--index-backend tiled` is faster).
-- **The app says `Model unavailable`:** the selected model has no saved artifact for that category, the artifact failed its integrity checks, or the pretrained weights are not cached. The message names the fix (`fit_model.py` or `fetch_weights.py`); use "Try loading again" afterwards. Details are in the app's console log, never in the browser.
-- **The app cannot find any model or result:** check that `INSPECTAI_DATA_ROOT`, `INSPECTAI_ARTIFACT_DIR`, and `INSPECTAI_REPORT_DIR` are set in the terminal that runs `streamlit run app.py`.
-- **`ArtifactError` (exit code 3):** the artifact is missing, corrupted, or stale. Run `scripts/fit_model.py` again with the same settings you evaluate with.
 
 ## License
 
@@ -244,4 +221,4 @@ The InspectAI source code and documentation are released under the [MIT License]
 
 VisA is released under CC BY 4.0. Cite: Zou, Jeong, Pemula, Zhang, and Dabeer, "SPot-the-Difference Self-Supervised Pre-training for Anomaly Detection and Segmentation", ECCV 2022 (arXiv:2207.14315). See SPEC.md Section 3.1 for the attribution rules that apply to figures derived from the dataset.
 
-The example figures in [docs/results.md](docs/results.md) and [docs/final_report.md](docs/final_report.md) and the screenshot above use VisA images and are modified material (resized, with heatmaps and text added).
+The example figures in [docs/results.md](docs/results.md) and [docs/final_report.md](docs/final_report.md) and the image at the top use VisA images and are modified material (resized, with heatmaps and text added).

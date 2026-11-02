@@ -26,14 +26,17 @@ from inspectai.evaluation.dashboard import (
     performance_rows,
 )
 from inspectai.inference.predictor import inspect_image, option_by_key
+from inspectai.inference.uploads import validate_upload
 from inspectai.ui.common import (
     MSG_INFERENCE_FAILED,
     VISA_ATTRIBUTION,
     dashboard_results,
     environment,
     get_dataset,
+    get_sample_set,
     load_model,
 )
+from inspectai.visualization.heatmaps import outline_mask
 
 logger = logging.getLogger("inspectai.app")
 
@@ -257,25 +260,38 @@ def _show_mistake(category: str, option_key: str, row: dict, paths: Paths) -> No
     c4.metric("Model decision", decision)
 
     dataset = get_dataset(paths)
+    sample = bundled = sample_set = None
     if dataset is None:
-        st.info(
-            "The dataset images are not part of this deployment, so only the saved scores can "
-            "be shown. Run the app with INSPECTAI_DATA_ROOT set to see the image and overlay."
-        )
-        return
-    try:
-        # only images the split file lists are ever opened, never a path taken from the report
-        sample = next(s for s in dataset.get_samples(category) if s.image_rel == row["image"])
-    except (StopIteration, InspectAIError):
-        st.warning("This image is not listed in the local dataset.")
-        return
+        # without the dataset only the bundled samples have an image to show
+        sample_set = get_sample_set()
+        bundled = sample_set.find(category, row["image"]) if sample_set is not None else None
+        if bundled is None:
+            st.info("This image isn't included in the online demo, so only its scores are shown.")
+            return
+    else:
+        try:
+            # only images the split file lists are ever opened, never a path taken from the report
+            sample = next(s for s in dataset.get_samples(category) if s.image_rel == row["image"])
+        except (StopIteration, InspectAIError):
+            st.warning("This image is not listed in the local dataset.")
+            return
     outcome = load_model(paths, option_by_key(option_key), category)
     if outcome.predictor is None:
         st.warning(outcome.message)
         return
     try:
-        image = dataset.load_image(sample)
-        mask = dataset.load_mask(sample, image.shape[:2]) if sample.is_anomalous else None
+        if bundled is not None:
+            assert sample_set is not None
+            image = validate_upload(
+                sample_set.read_image_bytes(bundled),
+                bundled.file.rsplit("/", 1)[-1],
+                outcome.predictor.reference_aspect_ratio,
+            )
+            mask = sample_set.read_mask(bundled, image.shape[:2])
+        else:
+            assert dataset is not None and sample is not None
+            image = dataset.load_image(sample)
+            mask = dataset.load_mask(sample, image.shape[:2]) if sample.is_anomalous else None
         inspection = inspect_image(outcome.predictor, image)
     except (InspectAIError, ValueError, RuntimeError):
         logger.exception("The error-analysis image could not be processed")
@@ -284,7 +300,13 @@ def _show_mistake(category: str, option_key: str, row: dict, paths: Paths) -> No
     a, b, c = st.columns(3)
     a.image(image, caption="Original image", width="stretch")
     b.image(inspection.overlay, caption="Anomaly overlay", width="stretch")
-    if mask is not None:
+    if mask is not None and bundled is not None:
+        c.image(
+            outline_mask(inspection.heatmap, mask),
+            caption="Heatmap with the ground-truth defect outline",
+            width="stretch",
+        )
+    elif mask is not None:
         c.image(mask * 255, caption="Ground-truth defect mask", width="stretch")
     else:
         c.info("Normal image: no defect mask.")

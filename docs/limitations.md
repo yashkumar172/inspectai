@@ -36,7 +36,7 @@ claim in the README is read more broadly than the evidence allows.
   0.90 depending on model and category). F1 at the threshold does not follow ranking quality
   (on `fryum` the baseline's F1 exceeds Model B `dev`'s although Model B ranks images better). Compare
   models by AUROC and paired intervals, not by F1.
-- **Defect localisation is coarse.** Maps come from a 28x28 feature grid upsampled to the image
+- **Defect localization is coarse.** Maps come from a 28x28 feature grid upsampled to the image
   size; pixel IoU is 0.02 to 0.30 for every model (0.02 to 0.10 on `candle`, `pcb1`, `pcb2`). An
   edge-aware guided filter and extra `layer1` features were tried on those three categories and did
   not raise IoU / Dice (see [benchmarks.md](benchmarks.md)); the limit is the grid and the
@@ -66,8 +66,8 @@ claim in the README is read more broadly than the evidence allows.
 
 | Item | Status |
 |---|---|
-| Deployment (SPEC.md Section 15) | **Done, with limited verification.** The app is deployed on Streamlit Community Cloud from a dataset-free hosted bundle (`hosted/`: dashboard results, Model C `dev` artifacts with the ResNet-18 weights, and the classical baseline; Model C `dev` is the default model). The bundle was verified locally against the stored scores, and the deployed Inspect page was inspected from a user-provided screenshot. Memory use on the host, reliability under load and access without a sign-in have not been measured or checked. The local mode (`streamlit run app.py`) remains the primary supported one. Model B and the Model C `full` profile are not bundled; a float16 profile is not implemented (the store supports float16, the models write float32). |
-| Cross-browser and screen-size check of the app | **Not done.** The deployed app's Inspect page was seen in one screenshot only; other pages, other browsers, other screen sizes and light/dark themes were not systematically checked (the browser extension was unavailable in the development environment). The app is tested in-process with Streamlit's `AppTest` against synthetic and real artifacts, and `streamlit run app.py` starts and passes its health check. |
+| Deployment (SPEC.md Section 15) | **Done, with limited verification.** The app is deployed on Streamlit Community Cloud from a dataset-free hosted bundle (`hosted/`: dashboard results, Model C `dev` artifacts with the ResNet-18 weights, and the classical baseline; Model C `dev` is the default model). The bundle was verified locally against the stored scores, and the deployed app was tested manually with a normal and a defective candle image; the link opens publicly without signing in. Memory use on the host and reliability under load have not been measured. The local mode (`streamlit run app.py`) remains the primary supported one. Model B and the Model C `full` profile are not bundled; a float16 profile is not implemented (the store supports float16, the models write float32). |
+| Cross-browser and screen-size check of the app | **Not done.** The deployed app was tested manually with a normal and a defective candle image only; other pages, other browsers, other screen sizes and light/dark themes were not systematically checked (the browser extension was unavailable in the development environment). The app is tested in-process with Streamlit's `AppTest` against synthetic and real artifacts, and `streamlit run app.py` starts and passes its health check. |
 | Other five VisA objects | Not run (see above). |
 | Added categories fitted on all images | `candle`, `pcb1`, and `pcb2` were fitted on 400 of ~810 images; fits on all images were not run. |
 | Device selection | CPU only by design; `configs/default.yaml` accepts only `device: cpu` and the code never moves tensors to a GPU. |
@@ -89,7 +89,7 @@ claim in the README is read more broadly than the evidence allows.
 - **Faster Model C:** the optional `tiled` backend already selects the same coreset 2.4x to 4.6x faster per
   whole `dev` fit (see [benchmarks.md](benchmarks.md); no `full` benchmark was run). An approximate
   nearest-neighbor index was deliberately not added, and a float16 bank for hosting is still open.
-- **Finer localisation:** higher-resolution feature maps or multi-scale scoring.
+- **Finer localization:** higher-resolution feature maps or multi-scale scoring.
 - **Deployment:** a cross-browser UI review, memory and load measurements of the hosted app, and a lightweight hosted profile.
 - **Engineering:** a type checker and CI, and loading the
   classical artifact in `evaluate_model.py`.

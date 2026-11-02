@@ -106,7 +106,7 @@ comparison refusal, and the app's failure paths ([evaluation.md](evaluation.md),
 
 ## 9. Deployment status
 
-**Update after Milestone 7: deployed on Streamlit Community Cloud.** The app was later deployed from the hosted bundle described below (Model C `dev` is the default model, Model A stays selectable). The Inspect page of the deployed app was inspected visually from a user-provided screenshot only: cross-browser and screen-size testing, memory use on the host, reliability under load, and access without a sign-in have not been checked. See [deployment.md](deployment.md). The rest of this section is the state at Milestone 7, when the bundle had been verified locally only.
+**Update after Milestone 7: deployed on Streamlit Community Cloud.** The app was later deployed from the hosted bundle described below (Model C `dev` is the default model, Model A stays selectable). The deployed app was tested manually (a normal and a defective candle image both received the correct decision, and the link opens publicly without signing in); other browsers and screen sizes and the host's memory use under load have not been tested. See [deployment.md](deployment.md). The rest of this section is the state at Milestone 7, when the bundle had been verified locally only.
 
 **Prepared, not deployed (at Milestone 7).** Deployment (SPEC.md Section 15) is optional. A dataset-free hosted bundle
 (`hosted/`, about 408 MB) holds the dashboard results, the Model C `dev` artifacts for all seven
@@ -120,9 +120,9 @@ are not bundled.
 
 Full list: [limitations.md](limitations.md). In short: four of twelve objects evaluated with small test
 sets (50 + 100 images), one seed and one machine; model rankings depend on the category; thresholds from
-about 45 images are conservative (recall 0.06 to 0.90); localisation is coarse (pixel IoU 0.05 to 0.30);
-scores are not probabilities; the app's layout was inspected from a screenshot of the deployed app but
-not tested across browsers or screen sizes; benchmarks used the
+about 45 images are conservative (recall 0.06 to 0.90); localization is coarse (pixel IoU 0.05 to 0.30);
+scores are not probabilities; the deployed app was tested manually but not yet across browsers or
+screen sizes; benchmarks used the
 Balanced power plan; no static type checker or CI. Future work: more and cross-validated calibration
 data, the remaining eight objects and several seeds, a faster coreset or approximate search and a
 float16 bank for a smaller hosted bundle, finer feature resolution, and a cross-browser UI review and
@@ -184,3 +184,15 @@ baseline is not clearly worse than the deep models on `pcb2`, where it has the h
 Test status after this extension (counted, not estimated): 603 default tests passed (9 deselected)
 and 9 real-dataset/real-weights tests passed; the 600 quoted in Section 6 belong to the Milestone 7
 snapshot. Ruff check and format are clean.
+
+## Milestone checklist
+
+- [x] Milestone 0 — Repository inspection and setup
+- [x] Milestone 1 — Dataset and preprocessing (real VisA validates with 0 errors)
+- [x] Milestone 2 — Evaluation harness and classical baseline
+- [x] Milestone 3 — Feature extractor, Model B, and artifact store
+- [x] Milestone 4 — PatchCore-inspired model
+- [x] Milestone 5 — Comparison reports and additional categories (seven categories measured with all five configurations)
+- [x] Milestone 6 — Streamlit application (tested with `AppTest` and real artifacts; the deployed app was tested manually, not yet across browsers or screen sizes)
+- [x] Milestone 7 — Final verification and delivery (see this report; limitations are disclosed in [limitations.md](limitations.md))
+- [x] After the milestones — hosted Model C bundle deployed on Streamlit Community Cloud, optional `tiled` coreset backend, latency / INT8 benchmark, and the error-analysis dashboard

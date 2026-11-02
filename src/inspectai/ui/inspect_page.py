@@ -33,6 +33,7 @@ from inspectai.inference.predictor import (
 )
 from inspectai.inference.uploads import ALLOWED_EXTENSIONS, MAX_UPLOAD_BYTES, validate_upload
 from inspectai.preprocessing.images import ImageArray
+from inspectai.samples import SampleEntry
 from inspectai.ui.common import (
     MSG_INFERENCE_FAILED,
     VISA_ATTRIBUTION,
@@ -42,11 +43,14 @@ from inspectai.ui.common import (
     environment,
     fit_hint,
     get_dataset,
+    get_sample_set,
     load_model,
 )
+from inspectai.visualization.heatmaps import outline_mask
 
 logger = logging.getLogger("inspectai.app")
 
+SOURCE_SAMPLE = "Try a sample image"
 SOURCE_UPLOAD = "Upload an image"
 SOURCE_DATASET = "Choose a test image from the local dataset"
 DEFAULT_OPTION_KEY = "patchcore"  # highest mean image AUROC of the `dev` models in the comparison
@@ -65,6 +69,8 @@ class Shown:
     from_dataset: bool
     ground_truth: str | None
     mask: NDArray[np.uint8] | None
+    from_sample: bool = False
+    featured: bool = False
 
 
 def _option_label(option: ModelOption, available: dict[str, list[str]]) -> str:
@@ -96,6 +102,8 @@ def render() -> None:
         if available.get(DEFAULT_OPTION_KEY)
         else next(k for k in keys if available[k])
     )
+    dataset = get_dataset(paths)
+    sample_set = get_sample_set()
     left, right = st.columns(2)
     with left:
         option_key = st.selectbox(
@@ -106,13 +114,16 @@ def render() -> None:
             key="inspect_model",
         )
     option = by_key[option_key]
+    default_category = available[option_key][0] if available[option_key] else SUPPORTED_OBJECTS[0]
+    if sample_set is not None and dataset is None:  # hosted: start on the featured example
+        featured = sample_set.featured()
+        if featured is not None and featured.category in available[option_key]:
+            default_category = featured.category
     with right:
         category = st.selectbox(
             "Category (the kind of object in the image)",
             list(SUPPORTED_OBJECTS),
-            index=(
-                SUPPORTED_OBJECTS.index(available[option_key][0]) if available[option_key] else 0
-            ),
+            index=SUPPORTED_OBJECTS.index(default_category),
             format_func=lambda c: c if c in available[option_key] else f"{c} (not fitted)",
             key="inspect_category",
         )
@@ -125,13 +136,37 @@ def render() -> None:
         st.info(f"Create it with: `{fit_hint(option, category)}`")
         return
 
-    dataset = get_dataset(paths)
-    sources = [SOURCE_UPLOAD] + ([SOURCE_DATASET] if dataset is not None else [])
+    bundled = sample_set.for_category(category) if sample_set is not None else []
+    if bundled and dataset is None:  # hosted: samples first, they need no upload
+        sources = [SOURCE_SAMPLE, SOURCE_UPLOAD]
+    else:
+        sources = [SOURCE_UPLOAD]
+        sources += [SOURCE_DATASET] if dataset is not None else []
+        sources += [SOURCE_SAMPLE] if bundled else []
     source = st.radio("Image source", sources, horizontal=True, key="inspect_source")
 
     uploaded = None
     chosen: Sample | None = None
-    if source == SOURCE_UPLOAD:
+    entry: SampleEntry | None = None
+    if source == SOURCE_SAMPLE:
+        assert sample_set is not None
+        index = st.selectbox(
+            "Sample image",
+            list(range(len(bundled))),
+            format_func=lambda i: bundled[i].title,
+            key=f"inspect_bundled_sample_{category}",
+        )
+        entry = bundled[index]
+        if entry.featured:
+            st.caption(
+                "Featured example: chosen by hand (it is the image shown in the README), not by "
+                "the rule that picked the other samples."
+            )
+        st.caption(
+            "Sample images are test images of the VisA dataset, so the model has not seen them "
+            "while learning what is normal."
+        )
+    elif source == SOURCE_UPLOAD:
         uploaded = st.file_uploader(
             f"Image ({', '.join(e.lstrip('.').upper() for e in ALLOWED_EXTENSIONS)}; maximum "
             f"{MAX_UPLOAD_BYTES // 1024**2} MB)",
@@ -152,9 +187,14 @@ def render() -> None:
                 key="inspect_sample",
             )
 
-    can_run = uploaded is not None if source == SOURCE_UPLOAD else chosen is not None
+    if source == SOURCE_SAMPLE:
+        can_run = entry is not None
+    elif source == SOURCE_UPLOAD:
+        can_run = uploaded is not None
+    else:
+        can_run = chosen is not None
     if st.button("Run inspection", type="primary", disabled=not can_run, key="inspect_run"):
-        _run(paths, option, category, source, uploaded, chosen, dataset)
+        _run(paths, option, category, source, uploaded, chosen, dataset, entry, sample_set)
 
     failure = st.session_state.get(FAILURE_KEY)
     if failure is not None:
@@ -168,7 +208,9 @@ def render() -> None:
         _show(shown)
 
 
-def _run(paths, option, category, source, uploaded, chosen, dataset) -> None:  # type: ignore[no-untyped-def]
+def _run(  # type: ignore[no-untyped-def]
+    paths, option, category, source, uploaded, chosen, dataset, entry=None, sample_set=None
+) -> None:
     st.session_state.pop(STATE_KEY, None)
     st.session_state.pop(FAILURE_KEY, None)
     with st.spinner("Loading the model and checking its integrity..."):
@@ -180,7 +222,26 @@ def _run(paths, option, category, source, uploaded, chosen, dataset) -> None:  #
 
     ground_truth: str | None = None
     mask = None
-    if source == SOURCE_UPLOAD:
+    if source == SOURCE_SAMPLE:
+        assert entry is not None and sample_set is not None
+        try:
+            # the same validation as an upload, after the file's checksum has been verified
+            image = validate_upload(
+                sample_set.read_image_bytes(entry),
+                entry.file.rsplit("/", 1)[-1],
+                predictor.reference_aspect_ratio,
+            )
+            mask = sample_set.read_mask(entry, image.shape[:2])
+        except UploadError as exc:
+            st.error(f"This image cannot be used. {exc}")
+            return
+        except InspectAIError:
+            logger.exception("A sample image could not be loaded")
+            st.error("The selected sample image could not be loaded.")
+            return
+        origin = entry.source
+        ground_truth = entry.truth
+    elif source == SOURCE_UPLOAD:
         assert uploaded is not None
         try:
             image = validate_upload(
@@ -210,7 +271,15 @@ def _run(paths, option, category, source, uploaded, chosen, dataset) -> None:  #
             st.error(MSG_INFERENCE_FAILED)
             return
     st.session_state[STATE_KEY] = Shown(
-        predictor, inspection, image, origin, source == SOURCE_DATASET, ground_truth, mask
+        predictor,
+        inspection,
+        image,
+        origin,
+        source == SOURCE_DATASET,
+        ground_truth,
+        mask,
+        from_sample=source == SOURCE_SAMPLE,
+        featured=entry.featured if entry is not None else False,
     )
 
 
@@ -219,10 +288,17 @@ def _show(shown: Shown) -> None:
     st.divider()
     st.subheader("Result")
     st.caption(f"Model: {predictor.option.label} · Category: {predictor.category}")
-    if result.is_anomaly:
-        st.error(f"**{STATUS_ANOMALY}**")
-    else:
-        st.success("**Normal**")
+    verdict, truth = st.columns(2)
+    with verdict:
+        if result.is_anomaly:
+            st.error(f"**{STATUS_ANOMALY}**")
+        else:
+            st.success("**Normal**")
+    if shown.ground_truth is not None:
+        with truth:
+            st.info(f"**Ground truth: {shown.ground_truth}**")
+    if shown.featured:
+        st.caption("Featured example, chosen by hand (not by the blind sample-selection rule).")
 
     cal = result.calibration
     c1, c2, c3 = st.columns(3)
@@ -240,15 +316,25 @@ def _show(shown: Shown) -> None:
     st.warning(WRONG_CATEGORY_WARNING)
     st.caption(NOT_A_PROBABILITY)
 
-    a, b, c = st.columns(3)
+    outlined = shown.from_sample and shown.mask is not None
+    a, b, c, *extra = st.columns(4 if outlined else 3)
     a.image(shown.image, caption="Original image", width="stretch")
     b.image(result.heatmap, caption="Anomaly heatmap", width="stretch")
     c.image(result.overlay, caption="Heatmap overlay", width="stretch")
+    if outlined:
+        assert shown.mask is not None
+        extra[0].image(
+            outline_mask(result.heatmap, shown.mask),
+            caption="Heatmap with the ground-truth defect outline",
+            width="stretch",
+        )
     st.caption(
         "Heatmap colors use a fixed scale: blue is 0, the middle is the model's pixel threshold "
         "(the 99th percentile of normal pixels), and red is twice that. Red areas are where the "
         "model sees the most unusual appearance."
     )
+    if shown.from_sample:
+        st.caption(f"Image and ground truth: bundled VisA test sample. {VISA_ATTRIBUTION}")
     if shown.from_dataset:
         st.caption(f"Ground truth from the dataset: **{shown.ground_truth}**. {VISA_ATTRIBUTION}")
         if shown.mask is not None:

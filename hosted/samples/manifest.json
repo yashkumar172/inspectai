@@ -1,0 +1,553 @@
+{
+  "schema_version": 1,
+  "seed": 42,
+  "selection_rule": "Per category, from the test list of the fitted artifacts only: 2 normal images by seeded random choice (seed 42), and the anomalous images at the 25th and 75th percentile of ground-truth mask area. No model output was used. One featured example was added by hand.",
+  "source": "VisA (Zou et al., ECCV 2022), CC BY 4.0; see ATTRIBUTION.md",
+  "split_file_sha256": "a48557e6033318cb90556f706196bc9d247a776a23ea51aecee5a80dd0332995",
+  "test_list_sha256": {
+    "candle": "70b5fd52b6235efb48c175dc50a96f85349311c057723a38ade056e6cb4b09ed",
+    "cashew": "99358e24764714f4d86accc34e78080775f95aa131292a885d68615d85546005",
+    "chewinggum": "b3b087d9dcda470a1cf8222900c17b2a8999db5512613e2ef3ad6d650cde3741",
+    "fryum": "4f04a60e1044c2f58af8281e5758a4c3a3ade6069580e71cf88314b25b42bd30",
+    "pcb1": "9ae9de263ecda68fc2173e7c1a986ea80137b00e7399216a27fd8e23b7084589",
+    "pcb2": "0d0fa27707ad0d3ecbacb6eb71e9fc5077375c7510d69a193cac3669e14ebfb1",
+    "pipe_fryum": "5c2eeca043522ebe8b61592eaeb08897e19eda7017d0d88658a316350030920d"
+  },
+  "samples": [
+    {
+      "category": "candle",
+      "label": "normal",
+      "file": "candle/normal_0178.JPG",
+      "source": "candle/Data/Images/Normal/0178.JPG",
+      "split": "test",
+      "sha256": "fa6c73cadc27884d0a695b1c88fc8ce3a0725444ba083347d3938cced3151f0b",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 0,
+        "pool": 100
+      }
+    },
+    {
+      "category": "candle",
+      "label": "normal",
+      "file": "candle/normal_0800.JPG",
+      "source": "candle/Data/Images/Normal/0800.JPG",
+      "split": "test",
+      "sha256": "2d9e67f49092b819fdb1098bffb4d1fab4fb96f584fae7b762b4dac3b8efadf5",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 1,
+        "pool": 100
+      }
+    },
+    {
+      "category": "candle",
+      "label": "anomaly",
+      "file": "candle/anomaly_001.JPG",
+      "source": "candle/Data/Images/Anomaly/001.JPG",
+      "split": "test",
+      "sha256": "c697ce4e2176c0de5d9f3ba8f38cd5acf99c61be5f91656ebb49c86652875f9a",
+      "mask_file": "candle/anomaly_001_mask.png",
+      "mask_source": "candle/Data/Masks/Anomaly/001.png",
+      "mask_sha256": "fa7b0e7bf50fdd004a4bb800f3b98c24ed11aacb2ed1a59c85c5cfb283b758f3",
+      "featured": true,
+      "selection": {
+        "method": "manual",
+        "reason": "Chosen manually (not by the blind rule): the example shown at the top of the README.",
+        "also_chosen_by_blind_rule": false
+      }
+    },
+    {
+      "category": "candle",
+      "label": "anomaly",
+      "file": "candle/anomaly_028.JPG",
+      "source": "candle/Data/Images/Anomaly/028.JPG",
+      "split": "test",
+      "sha256": "f42cb90134eb0a2a36f37bd96c033ceb869a9dbf303f007e253de0c948e69d91",
+      "mask_file": "candle/anomaly_028_mask.png",
+      "mask_source": "candle/Data/Masks/Anomaly/028.png",
+      "mask_sha256": "f0ff3323a6bb804f42d1d81507154a92fbb33faa1e744b17b887f05c6ca17afb",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.25,
+        "rank_in_area_order": 25,
+        "pool": 100,
+        "mask_area_pixels": 989
+      }
+    },
+    {
+      "category": "candle",
+      "label": "anomaly",
+      "file": "candle/anomaly_060.JPG",
+      "source": "candle/Data/Images/Anomaly/060.JPG",
+      "split": "test",
+      "sha256": "ebf963283f39dac4b2b1982d45692214315e2fb200c44a2e7c47e22e78fcabe1",
+      "mask_file": "candle/anomaly_060_mask.png",
+      "mask_source": "candle/Data/Masks/Anomaly/060.png",
+      "mask_sha256": "3c8fa5ec418d47a38e56e6eef416e94eed6aae9614255bd2406a5433dc5147ee",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.75,
+        "rank_in_area_order": 74,
+        "pool": 100,
+        "mask_area_pixels": 4459
+      }
+    },
+    {
+      "category": "cashew",
+      "label": "normal",
+      "file": "cashew/normal_089.JPG",
+      "source": "cashew/Data/Images/Normal/089.JPG",
+      "split": "test",
+      "sha256": "b77aa89e6460e0d5f48b39fd45eb210fb9773dbb80b03a07706b86fb682109cd",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 0,
+        "pool": 50
+      }
+    },
+    {
+      "category": "cashew",
+      "label": "normal",
+      "file": "cashew/normal_402.JPG",
+      "source": "cashew/Data/Images/Normal/402.JPG",
+      "split": "test",
+      "sha256": "87a79d7844c326cc58158dd8513d8011876192a65867c9e56e29fcd3848a7c3b",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 1,
+        "pool": 50
+      }
+    },
+    {
+      "category": "cashew",
+      "label": "anomaly",
+      "file": "cashew/anomaly_006.JPG",
+      "source": "cashew/Data/Images/Anomaly/006.JPG",
+      "split": "test",
+      "sha256": "0831aa04e2c6f9b29d68aa85d93152a8bc5698aeea9676d832bb8a80c0ff5682",
+      "mask_file": "cashew/anomaly_006_mask.png",
+      "mask_source": "cashew/Data/Masks/Anomaly/006.png",
+      "mask_sha256": "410adc93ee70b89e60aa65e1c3daebbc365a6a6a34f78290ee4aa53c846eeeb2",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.75,
+        "rank_in_area_order": 74,
+        "pool": 100,
+        "mask_area_pixels": 3603
+      }
+    },
+    {
+      "category": "cashew",
+      "label": "anomaly",
+      "file": "cashew/anomaly_050.JPG",
+      "source": "cashew/Data/Images/Anomaly/050.JPG",
+      "split": "test",
+      "sha256": "02118dfcc70533cacff3d1f94e7545584a0162a8d5af70a71a95e9a44c1ec23b",
+      "mask_file": "cashew/anomaly_050_mask.png",
+      "mask_source": "cashew/Data/Masks/Anomaly/050.png",
+      "mask_sha256": "729c5134bf5094de9690c97d9eee1db1dc4aeb11464caf666fa445c953e8e002",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.25,
+        "rank_in_area_order": 25,
+        "pool": 100,
+        "mask_area_pixels": 1013
+      }
+    },
+    {
+      "category": "chewinggum",
+      "label": "normal",
+      "file": "chewinggum/normal_093.JPG",
+      "source": "chewinggum/Data/Images/Normal/093.JPG",
+      "split": "test",
+      "sha256": "b712b34d4ab2d25e9bbad1e8d4421b6f1d180380a2b4c2b797fc48264006565b",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 0,
+        "pool": 50
+      }
+    },
+    {
+      "category": "chewinggum",
+      "label": "normal",
+      "file": "chewinggum/normal_405.JPG",
+      "source": "chewinggum/Data/Images/Normal/405.JPG",
+      "split": "test",
+      "sha256": "e435eb83acd21b69044f75debfcb789d6a33a8e54106a11be8fae51dc4b3f716",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 1,
+        "pool": 50
+      }
+    },
+    {
+      "category": "chewinggum",
+      "label": "anomaly",
+      "file": "chewinggum/anomaly_064.JPG",
+      "source": "chewinggum/Data/Images/Anomaly/064.JPG",
+      "split": "test",
+      "sha256": "2a1350c2f8f91d44b06273df91c2839e8ab3d3c5e5a2471bc8e7fddb6948ae67",
+      "mask_file": "chewinggum/anomaly_064_mask.png",
+      "mask_source": "chewinggum/Data/Masks/Anomaly/064.png",
+      "mask_sha256": "059581d0affaab16be89b0b281239d5a6d55472f00cbbe87f498c38abab13f3f",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.75,
+        "rank_in_area_order": 74,
+        "pool": 100,
+        "mask_area_pixels": 19614
+      }
+    },
+    {
+      "category": "chewinggum",
+      "label": "anomaly",
+      "file": "chewinggum/anomaly_065.JPG",
+      "source": "chewinggum/Data/Images/Anomaly/065.JPG",
+      "split": "test",
+      "sha256": "2e75e13a34c8921e5f8c786d46254793747cfe662e192d7f0fea44051c19349d",
+      "mask_file": "chewinggum/anomaly_065_mask.png",
+      "mask_source": "chewinggum/Data/Masks/Anomaly/065.png",
+      "mask_sha256": "a5f57c725810d0109c378a10e290e8f923e724c179062198d8c9e976abba6063",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.25,
+        "rank_in_area_order": 25,
+        "pool": 100,
+        "mask_area_pixels": 3495
+      }
+    },
+    {
+      "category": "fryum",
+      "label": "normal",
+      "file": "fryum/normal_089.JPG",
+      "source": "fryum/Data/Images/Normal/089.JPG",
+      "split": "test",
+      "sha256": "26a01f50ddd796e601875228cd570767eddca1993090309949e917a57908a3c5",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 0,
+        "pool": 50
+      }
+    },
+    {
+      "category": "fryum",
+      "label": "normal",
+      "file": "fryum/normal_402.JPG",
+      "source": "fryum/Data/Images/Normal/402.JPG",
+      "split": "test",
+      "sha256": "236433b470850d6061c9d3cea85ec2be4f3b5d8e6caa2d96a579ab76b37ea42f",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 1,
+        "pool": 50
+      }
+    },
+    {
+      "category": "fryum",
+      "label": "anomaly",
+      "file": "fryum/anomaly_009.JPG",
+      "source": "fryum/Data/Images/Anomaly/009.JPG",
+      "split": "test",
+      "sha256": "6228e5c3e4aaa31eb70b47da2354e915e69fd59b3a49405f013531ba126587dc",
+      "mask_file": "fryum/anomaly_009_mask.png",
+      "mask_source": "fryum/Data/Masks/Anomaly/009.png",
+      "mask_sha256": "f69787ece9652480df0040798ef8aec4b661b2907989bcd473491e03aeaca9a3",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.75,
+        "rank_in_area_order": 74,
+        "pool": 100,
+        "mask_area_pixels": 14186
+      }
+    },
+    {
+      "category": "fryum",
+      "label": "anomaly",
+      "file": "fryum/anomaly_029.JPG",
+      "source": "fryum/Data/Images/Anomaly/029.JPG",
+      "split": "test",
+      "sha256": "133e01f64fedc1027d8e4b424b10af1031cd7722eed0c2e8369c47262ecfa2b3",
+      "mask_file": "fryum/anomaly_029_mask.png",
+      "mask_source": "fryum/Data/Masks/Anomaly/029.png",
+      "mask_sha256": "58c51fec05bff33f96e58675df3dd563f4dc943752213402a2005f6f41b84fac",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.25,
+        "rank_in_area_order": 25,
+        "pool": 100,
+        "mask_area_pixels": 612
+      }
+    },
+    {
+      "category": "pcb1",
+      "label": "normal",
+      "file": "pcb1/normal_0178.JPG",
+      "source": "pcb1/Data/Images/Normal/0178.JPG",
+      "split": "test",
+      "sha256": "b182e675080892a852d438b32a524d54a214965ff285d11210c5aedf2fee4673",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 0,
+        "pool": 100
+      }
+    },
+    {
+      "category": "pcb1",
+      "label": "normal",
+      "file": "pcb1/normal_0804.JPG",
+      "source": "pcb1/Data/Images/Normal/0804.JPG",
+      "split": "test",
+      "sha256": "0682705e5cd15352208e5d6a415f50ea716d5986dd30bbf45953f8f10fae2a4e",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 1,
+        "pool": 100
+      }
+    },
+    {
+      "category": "pcb1",
+      "label": "anomaly",
+      "file": "pcb1/anomaly_014.JPG",
+      "source": "pcb1/Data/Images/Anomaly/014.JPG",
+      "split": "test",
+      "sha256": "6c3005a3ba78b7be59978468aae3e11234acb5dd9f76c9e0b282cfe8db3d585e",
+      "mask_file": "pcb1/anomaly_014_mask.png",
+      "mask_source": "pcb1/Data/Masks/Anomaly/014.png",
+      "mask_sha256": "b58e9ee6ef29e34d47b151bc82dd6e91f397ec2ac4698486fb118c5e30eeb1ff",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.75,
+        "rank_in_area_order": 74,
+        "pool": 100,
+        "mask_area_pixels": 4636
+      }
+    },
+    {
+      "category": "pcb1",
+      "label": "anomaly",
+      "file": "pcb1/anomaly_085.JPG",
+      "source": "pcb1/Data/Images/Anomaly/085.JPG",
+      "split": "test",
+      "sha256": "af372794bd4ed8300dc342843bf3922f842f92f53122c1cb5d821f57b23039ef",
+      "mask_file": "pcb1/anomaly_085_mask.png",
+      "mask_source": "pcb1/Data/Masks/Anomaly/085.png",
+      "mask_sha256": "88d64507cec466cb694fd7e954d08135a4c5491f8a201b5a4b44b8f09fb43de9",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.25,
+        "rank_in_area_order": 25,
+        "pool": 100,
+        "mask_area_pixels": 2282
+      }
+    },
+    {
+      "category": "pcb2",
+      "label": "normal",
+      "file": "pcb2/normal_0178.JPG",
+      "source": "pcb2/Data/Images/Normal/0178.JPG",
+      "split": "test",
+      "sha256": "770182b3497e3dcf610a1a32bc1e63d32af91384a6e29cde07e5b7236c054714",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 0,
+        "pool": 100
+      }
+    },
+    {
+      "category": "pcb2",
+      "label": "normal",
+      "file": "pcb2/normal_0804.JPG",
+      "source": "pcb2/Data/Images/Normal/0804.JPG",
+      "split": "test",
+      "sha256": "14fb4cc878aa8c6f8e1264183378de59540897e74b17deeb3fee8643eb8b2d98",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 1,
+        "pool": 100
+      }
+    },
+    {
+      "category": "pcb2",
+      "label": "anomaly",
+      "file": "pcb2/anomaly_001.JPG",
+      "source": "pcb2/Data/Images/Anomaly/001.JPG",
+      "split": "test",
+      "sha256": "2d71a3af119e7495bb69af5a063020ad23e8ee0089be0ca1a1e8ac022d48bab9",
+      "mask_file": "pcb2/anomaly_001_mask.png",
+      "mask_source": "pcb2/Data/Masks/Anomaly/001.png",
+      "mask_sha256": "15684849f94e0a588227e5182288236a40f75cc816f2fb293174b9d00574dce0",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.25,
+        "rank_in_area_order": 25,
+        "pool": 100,
+        "mask_area_pixels": 2744
+      }
+    },
+    {
+      "category": "pcb2",
+      "label": "anomaly",
+      "file": "pcb2/anomaly_088.JPG",
+      "source": "pcb2/Data/Images/Anomaly/088.JPG",
+      "split": "test",
+      "sha256": "652e9b8de8c7aecb18eaaeffb9dc135744f78b619a319d4c31a7f822c483aa3e",
+      "mask_file": "pcb2/anomaly_088_mask.png",
+      "mask_source": "pcb2/Data/Masks/Anomaly/088.png",
+      "mask_sha256": "498940f29b95a6015d3d74f083ef6d528e5a1a882669fd9efbfbb549a46b1d67",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.75,
+        "rank_in_area_order": 74,
+        "pool": 100,
+        "mask_area_pixels": 5778
+      }
+    },
+    {
+      "category": "pipe_fryum",
+      "label": "normal",
+      "file": "pipe_fryum/normal_089.JPG",
+      "source": "pipe_fryum/Data/Images/Normal/089.JPG",
+      "split": "test",
+      "sha256": "9372d4179f3cd453865f2025568fe5dc5bdc036e7cc50a43c25b9c85ecef935f",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 0,
+        "pool": 50
+      }
+    },
+    {
+      "category": "pipe_fryum",
+      "label": "normal",
+      "file": "pipe_fryum/normal_402.JPG",
+      "source": "pipe_fryum/Data/Images/Normal/402.JPG",
+      "split": "test",
+      "sha256": "f838cd77a431f508f37d5847d942754f6e9a567d9e3394acf5e2196c3f395352",
+      "mask_file": null,
+      "mask_source": null,
+      "mask_sha256": null,
+      "featured": false,
+      "selection": {
+        "method": "seeded_random",
+        "seed": 42,
+        "rank": 1,
+        "pool": 50
+      }
+    },
+    {
+      "category": "pipe_fryum",
+      "label": "anomaly",
+      "file": "pipe_fryum/anomaly_052.JPG",
+      "source": "pipe_fryum/Data/Images/Anomaly/052.JPG",
+      "split": "test",
+      "sha256": "39c5b1b12b510a6ceaf3dd19f1c8aba911c36d848f16e92e8b8c591abef7abb8",
+      "mask_file": "pipe_fryum/anomaly_052_mask.png",
+      "mask_source": "pipe_fryum/Data/Masks/Anomaly/052.png",
+      "mask_sha256": "41f35c2a95121a56a1e3780aa98dc3edf09b3670d9cd946a8f8eea5ffc2216e5",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.25,
+        "rank_in_area_order": 25,
+        "pool": 100,
+        "mask_area_pixels": 775
+      }
+    },
+    {
+      "category": "pipe_fryum",
+      "label": "anomaly",
+      "file": "pipe_fryum/anomaly_079.JPG",
+      "source": "pipe_fryum/Data/Images/Anomaly/079.JPG",
+      "split": "test",
+      "sha256": "e6dd0ed7a2cdca322caa64f9d98d075c6a2fb1289e9af3b30cea50b1350df475",
+      "mask_file": "pipe_fryum/anomaly_079_mask.png",
+      "mask_source": "pipe_fryum/Data/Masks/Anomaly/079.png",
+      "mask_sha256": "14b5a8a119743162a614acfdfd8dcc78a4a16cc42cfc16e20b6619c41cd4624f",
+      "featured": false,
+      "selection": {
+        "method": "mask_area_quantile",
+        "quantile": 0.75,
+        "rank_in_area_order": 74,
+        "pool": 100,
+        "mask_area_pixels": 5517
+      }
+    }
+  ]
+}

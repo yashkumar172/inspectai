@@ -24,6 +24,7 @@ from inspectai.errors import (
 )
 from inspectai.evaluation.dashboard import CategoryResults, load_results
 from inspectai.inference.predictor import ModelOption, Predictor, load_predictor, option_by_key
+from inspectai.samples import SampleError, SampleSet, load_samples, samples_root
 
 logger = logging.getLogger("inspectai.app")
 
@@ -60,6 +61,15 @@ def environment() -> Environment:
         return Environment(None, MSG_NOT_CONFIGURED)
     use_bundled_weights(paths)
     return Environment(paths, None)
+
+
+def get_sample_set() -> SampleSet | None:
+    """The sample images bundled with the app, or None if there are none (or the manifest is bad)."""
+    try:
+        return load_samples(samples_root())
+    except SampleError:
+        logger.warning("The bundled sample images could not be used", exc_info=True)
+        return None
 
 
 def fit_hint(option: ModelOption, category: str) -> str:

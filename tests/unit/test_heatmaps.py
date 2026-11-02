@@ -100,3 +100,21 @@ def test_save_rgb_png_round_trips_through_a_non_ascii_path(tmp_path: Path) -> No
     assert np.array_equal(decoded[:, :, ::-1], image)
     with pytest.raises(ImageError):
         save_rgb_png(target, np.zeros((4, 4), dtype=np.uint8))
+
+
+def test_outline_mask_draws_only_the_border_and_leaves_the_input_alone() -> None:
+    from inspectai.visualization.heatmaps import outline_mask
+
+    image = np.zeros((100, 100, 3), dtype=np.uint8)
+    mask = np.zeros((100, 100), dtype=np.uint8)
+    mask[30:70, 30:70] = 1
+    out = outline_mask(image, mask)
+    assert not image.any()  # the input is not modified
+    assert out[30, 50].tolist() == [255, 255, 255]  # on the border
+    assert out[50, 50].tolist() == [0, 0, 0]  # the inside is untouched
+    assert out[5, 5].tolist() == [0, 0, 0]  # so is the outside
+    small = outline_mask(image, mask[::2, ::2])  # a mask of another size is resized
+    assert small.shape == image.shape and small.any()
+    assert not outline_mask(image, np.zeros((100, 100), dtype=np.uint8)).any()  # empty: unchanged
+    with pytest.raises(ImageError):
+        outline_mask(image, np.zeros((4, 4, 3), dtype=np.uint8))

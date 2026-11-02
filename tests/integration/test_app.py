@@ -23,9 +23,10 @@ from inspectai.inference.predictor import (
     WRONG_CATEGORY_WARNING,
 )
 from inspectai.inference.uploads import MAX_UPLOAD_BYTES
+from inspectai.samples import build_samples
 from inspectai.ui.common import MSG_INFERENCE_FAILED, MSG_INTEGRITY, MSG_NOT_CONFIGURED
 from inspectai.ui.dashboard_page import NO_RESULTS
-from inspectai.ui.inspect_page import SOURCE_DATASET, SOURCE_UPLOAD
+from inspectai.ui.inspect_page import SOURCE_DATASET, SOURCE_SAMPLE, SOURCE_UPLOAD
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -76,6 +77,14 @@ def _predictions(world: World, folder: str, category: str) -> dict[str, dict]:
 @pytest.fixture(autouse=True)
 def _fresh_caches() -> None:
     st.cache_resource.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_samples(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep the repository's real `hosted/samples` out of tests that do not ask for samples."""
+    monkeypatch.setattr("inspectai.config.BUNDLE_ROOT", tmp_path_factory.mktemp("no bundle"))
 
 
 def _configure(
@@ -774,6 +783,174 @@ def test_the_hosted_error_analysis_shows_scores_but_no_images(
     at.radio(key="dashboard_error_kind").set_value("false_positive").run()
     assert not at.exception and _error_table(at) is not None
     at.selectbox(key="dashboard_error_sample").select_index(0).run()
-    assert any("not part of this deployment" in i.value for i in at.info)
+    assert any("isn't included in the online demo" in i.value for i in at.info)
+    assert not any("INSPECTAI_DATA_ROOT" in i.value for i in at.info)
     assert len(at.get("image")) == before  # no dataset image was shown
     _no_leaks(at, hosted_env, "Data/Images")
+
+
+# ----- bundled sample images ---------------------------------------------------------------
+
+
+def _captions(at: AppTest) -> list[str]:
+    return [im.caption for element in at.get("image") for im in element.proto.imgs]
+
+
+def _build_samples(world: World, destination: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Samples chosen from the synthetic test split; the featured one is a cashew anomaly."""
+    dataset = VisADataset(world.synthetic.split_csv, world.synthetic.images_root)
+    lists = {
+        c: json.loads((world.artifacts / "patchcore" / c / "split.json").read_text("utf-8"))["test"]
+        for c in ("cashew", "pipe_fryum")
+    }
+    featured = next(rel for rel in lists["cashew"] if "/Anomaly/" in rel)
+    monkeypatch.setattr("inspectai.samples.FEATURED_CATEGORY", "cashew")
+    monkeypatch.setattr("inspectai.samples.FEATURED_SOURCE", featured)
+    build_samples(dataset, lists, destination)
+
+
+@pytest.fixture
+def sample_env(world: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A hosted bundle (Model C and Model A, no dataset) that also holds sample images."""
+    from inspectai.deployment import export_hosted_bundle
+
+    fake = lambda name, allow_download=None, hub_dir=None: (FakeBackbone(), FAKE_WEIGHTS)
+    monkeypatch.setattr("inspectai.deployment.load_backbone", fake)
+    bundle = tmp_path / "hosted"
+    export_hosted_bundle(world.artifacts, world.reports, bundle, models=("patchcore", "classical"))
+    _build_samples(world, bundle / "samples", monkeypatch)
+    for name in ("INSPECTAI_DATA_ROOT", "INSPECTAI_ARTIFACT_DIR", "INSPECTAI_REPORT_DIR"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("inspectai.config.BUNDLE_ROOT", bundle)
+    monkeypatch.setenv("TORCH_HOME", str(tmp_path / "torch"))
+    monkeypatch.setattr("inspectai.artifacts.patchcore_io.load_backbone", lambda name: fake(name))
+    return bundle
+
+
+def test_in_hosted_mode_the_sample_option_is_the_default_and_starts_on_the_featured_example(
+    sample_env: Path,
+) -> None:
+    at = _page("inspect_page").run()
+    assert not at.exception and not at.error
+    source = at.radio(key="inspect_source")
+    assert source.value == SOURCE_SAMPLE and SOURCE_UPLOAD in source.options
+    assert at.selectbox(key="inspect_model").value == "patchcore"
+    assert at.selectbox(key="inspect_category").value == "cashew"  # the featured example's category
+    picker = at.selectbox(key="inspect_bundled_sample_cashew")
+    assert picker.index == 0 and picker.options[0].startswith("Featured example")
+    assert "chosen by hand" in _texts(at)  # the label stays visible
+    assert not at.file_uploader  # nothing to upload for a sample
+    assert not at.metric  # nothing runs until the button is clicked
+
+
+def test_running_the_featured_sample_shows_the_decision_the_ground_truth_and_the_outline(
+    sample_env: Path,
+) -> None:
+    at = _page("inspect_page").run()
+    at.button(key="inspect_run").click().run()
+    assert not at.exception and not any("cannot be used" in e.value for e in at.error)
+    assert len(at.metric) == 3 and float(at.metric[0].value) > 0
+    decision = [*at.error, *at.success]
+    assert any(STATUS_ANOMALY in d.value or STATUS_NORMAL in d.value for d in decision)
+    assert any("Ground truth: anomalous" in i.value for i in at.info)
+    assert "Heatmap with the ground-truth defect outline" in _captions(at)  # next to the heatmap
+    text = _texts(at)
+    assert "VisA" in text and "CC BY 4.0" in text  # the attribution under the image
+    assert "Featured example" in text
+    _no_leaks(at, sample_env, "Data/Images")
+
+
+def test_a_normal_sample_shows_its_ground_truth_and_no_outline(sample_env: Path) -> None:
+    at = _page("inspect_page").run()
+    picker = at.selectbox(key="inspect_bundled_sample_cashew")
+    normal = next(i for i, o in enumerate(picker.options) if o.startswith("Normal image"))
+    picker.select_index(normal).run()
+    at.button(key="inspect_run").click().run()
+    assert not at.exception and len(at.metric) == 3
+    assert any("Ground truth: normal" in i.value for i in at.info)
+    assert "Heatmap with the ground-truth defect outline" not in _captions(at)
+
+
+def test_a_sample_goes_through_the_same_checks_as_an_upload(
+    sample_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[tuple[int, str, object]] = []
+    from inspectai.inference.uploads import validate_upload as real
+
+    def spy(data, filename, reference=None, *args, **kwargs):  # type: ignore[no-untyped-def]
+        seen.append((len(data), filename, reference))
+        return real(data, filename, reference, *args, **kwargs)
+
+    monkeypatch.setattr("inspectai.ui.inspect_page.validate_upload", spy)
+    at = _page("inspect_page").run()
+    at.button(key="inspect_run").click().run()
+    assert not at.exception and len(seen) == 1
+    size, name, reference = seen[0]
+    assert size > 0 and name.endswith(".JPG") and reference is not None  # the category's ratio
+
+
+def test_a_damaged_sample_file_is_refused_and_nothing_is_predicted(sample_env: Path) -> None:
+    from inspectai.samples import load_samples
+
+    loaded = load_samples(sample_env / "samples")
+    assert loaded is not None and loaded.featured() is not None
+    damaged = sample_env / "samples" / loaded.featured().file  # type: ignore[union-attr]
+    damaged.write_bytes(damaged.read_bytes() + b"x")
+    at = _page("inspect_page").run()  # starts on the featured sample
+    at.button(key="inspect_run").click().run()
+    assert any("could not be loaded" in e.value for e in at.error)
+    assert not at.metric
+    _no_leaks(at, sample_env)
+
+
+def test_uploads_still_work_next_to_the_samples(sample_env: Path) -> None:
+    at = _page("inspect_page").run()
+    at.radio(key="inspect_source").set_value(SOURCE_UPLOAD).run()
+    at.file_uploader(key="inspect_upload").upload("photo.png", _png(), "image/png").run()
+    at.button(key="inspect_run").click().run()
+    assert not at.exception and len(at.metric) == 3
+    assert not any("Ground truth" in i.value for i in at.info)  # an upload has no ground truth
+
+
+def test_with_a_local_dataset_the_default_stays_upload_and_samples_are_still_offered(
+    app_env: World, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bundle = tmp_path / "hosted with samples"
+    _build_samples(app_env, bundle / "samples", monkeypatch)
+    monkeypatch.setattr("inspectai.config.BUNDLE_ROOT", bundle)
+    at = _page("inspect_page").run()
+    source = at.radio(key="inspect_source")
+    assert source.value == SOURCE_UPLOAD
+    assert SOURCE_DATASET in source.options and SOURCE_SAMPLE in source.options
+
+
+def test_without_samples_the_page_is_as_before(hosted_env: Path) -> None:
+    at = _page("inspect_page").run()
+    assert at.radio(key="inspect_source").options == [SOURCE_UPLOAD]
+
+
+@pytest.mark.parametrize(
+    ("anomalous", "kind"), [(False, "false_positive"), (True, "false_negative")]
+)
+def test_error_analysis_shows_the_image_when_it_is_a_bundled_sample(
+    sample_env: Path, monkeypatch: pytest.MonkeyPatch, anomalous: bool, kind: str
+) -> None:
+    from inspectai.samples import load_samples
+
+    loaded = load_samples(sample_env / "samples")
+    assert loaded is not None
+    entry = next(e for e in loaded.for_category("cashew") if e.is_anomalous == anomalous)
+    monkeypatch.setattr(
+        "inspectai.ui.dashboard_page.misclassified_images",
+        _fake_mistakes(entry.source, int(anomalous)),
+    )
+    at = _page("dashboard_page").run()
+    at.radio(key="dashboard_error_kind").set_value(kind).run()
+    at.selectbox(key="dashboard_error_sample").select_index(0).run()
+    assert not at.exception and not at.error
+    assert not any("isn't included in the online demo" in i.value for i in at.info)
+    captions = _captions(at)
+    assert "Original image" in captions and "Anomaly overlay" in captions
+    outline = "Heatmap with the ground-truth defect outline"
+    assert (outline in captions) == anomalous  # only an anomalous sample has a mask to outline
+    _no_leaks(at, sample_env, "Data/Images")
