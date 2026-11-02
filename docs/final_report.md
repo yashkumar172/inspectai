@@ -49,7 +49,7 @@ images per category, thresholds from `calibration_normal`, 256x256 evaluation re
 | C PatchCore-inspired full | 0.968 (0.944-0.987) | 0.990 (0.977-0.998) | 0.967 (0.938-0.991) | 0.914 (0.864-0.952) | 0.960 |
 
 Full tables (AP, pixel AUROC, IoU, Dice, precision, recall, FPR, F1, confusion matrices, performance)
-are in the README and in the generated `comparison.md` / `comparison.json`. Every image-level metric
+are in [results.md](results.md) and in the generated `comparison.md` / `comparison.json`. Every image-level metric
 was re-derived from the saved per-image predictions and agrees with the harness summaries.
 
 ## 5. Baseline comparison
@@ -106,12 +106,14 @@ comparison refusal, and the app's failure paths ([evaluation.md](evaluation.md),
 
 ## 9. Deployment status
 
-**Prepared, not deployed.** Deployment (SPEC.md Section 15) is optional. A dataset-free hosted bundle
+**Update after Milestone 7: deployed on Streamlit Community Cloud.** The app was later deployed from the hosted bundle described below (Model C `dev` is the default model, Model A stays selectable). The Inspect page of the deployed app was inspected visually from a user-provided screenshot only: cross-browser and screen-size testing, memory use on the host, reliability under load, and access without a sign-in have not been checked. See [deployment.md](deployment.md). The rest of this section is the state at Milestone 7, when the bundle had been verified locally only.
+
+**Prepared, not deployed (at Milestone 7).** Deployment (SPEC.md Section 15) is optional. A dataset-free hosted bundle
 (`hosted/`, about 408 MB) holds the dashboard results, the Model C `dev` artifacts for all seven
 categories with the ResNet-18 weights they need, and the classical baseline; `requirements.txt` installs
 the CPU-only dependencies. From the bundle alone, Model C reproduced the stored evaluation scores exactly
-on 28 test images (about 0.2 s per image, about 1.1 GB peak memory). Nothing was hosted or tested online,
-so no working hosted deployment is claimed. Model B, the Model C `full` profile, and a float16 profile
+on 28 test images (about 0.2 s per image, about 1.1 GB peak memory). At that time nothing was hosted or tested
+online. Model B, the Model C `full` profile, and a float16 profile
 are not bundled.
 
 ## 10. Limitations and potential future improvements
@@ -119,11 +121,12 @@ are not bundled.
 Full list: [limitations.md](limitations.md). In short: four of twelve objects evaluated with small test
 sets (50 + 100 images), one seed and one machine; model rankings depend on the category; thresholds from
 about 45 images are conservative (recall 0.06 to 0.90); localisation is coarse (pixel IoU 0.05 to 0.30);
-scores are not probabilities; the app's layout was not reviewed in a browser; benchmarks used the
+scores are not probabilities; the app's layout was inspected from a screenshot of the deployed app but
+not tested across browsers or screen sizes; benchmarks used the
 Balanced power plan; no static type checker or CI. Future work: more and cross-validated calibration
 data, the remaining eight objects and several seeds, a faster coreset or approximate search and a
-float16 bank for a smaller hosted bundle, finer feature resolution, and a browser-based UI review before any
-deployment.
+float16 bank for a smaller hosted bundle, finer feature resolution, and a cross-browser UI review and
+measurements of the hosted app's memory use and reliability.
 
 ## Definition of Done (SPEC.md Section 18)
 
@@ -152,7 +155,8 @@ deployment.
 | 21 | Repository, virtual environment, dataset, and artifacts are outside OneDrive | Done | `C:\dev\inspectai`, `C:\dev\venvs\inspectai`, `C:\dev\inspectai-data` |
 
 PatchCore-inspired functionality was implemented and evaluated, not deferred. Deployment (optional) was
-prepared locally but not hosted; the unfinished items are listed in [limitations.md](limitations.md).
+prepared locally at Milestone 7 and hosted afterwards (section 9); the unfinished items are listed in
+[limitations.md](limitations.md).
 
 ## Milestones
 
@@ -171,8 +175,7 @@ prepared locally but not hosted; the unfinished items are listed in [limitations
 
 After Milestone 7 the benchmark was extended to three more VisA objects with the same models and
 protocol (no tuning). The tables above describe the original four categories and are unchanged; the
-seven-category results, the macro averages, and the paired differences are in the README ("Results by
-category") and in the regenerated `comparison.md`. Differences from the original four: these objects
+seven-category results, the macro averages, and the paired differences are in [results.md](results.md) and in the regenerated `comparison.md`. Differences from the original four: these objects
 have about 810 fit images, so all five configurations were fitted on the same seeded subset of 400
 (`--max-fit-images 400`); the test sets have 100 normal and 100 anomalous images; and the classical
 baseline is not clearly worse than the deep models on `pcb2`, where it has the highest image AUROC

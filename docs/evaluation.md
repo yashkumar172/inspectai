@@ -2,7 +2,7 @@
 
 How InspectAI measures its models, how thresholds are chosen without touching the test set, how
 models are compared, and how to reproduce every number. The measured results themselves are in the
-[README](../README.md) (per-model sections and "Comparison report") and in the generated
+[models.md](models.md) (per-model sections) and [results.md](results.md) (comparison report), summarized in the [README](../README.md) and in the generated
 `comparison.md`.
 
 ## 1. Protocol in one paragraph

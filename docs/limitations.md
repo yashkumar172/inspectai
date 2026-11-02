@@ -66,8 +66,8 @@ claim in the README is read more broadly than the evidence allows.
 
 | Item | Status |
 |---|---|
-| Deployment (SPEC.md Section 15) | **Not attempted.** It is optional; the project has no remote repository, and hosting was not tried. The documented local-only mode is the supported state; a dataset-free hosted bundle (`hosted/`: dashboard results, Model C `dev` artifacts with the ResNet-18 weights, and the classical baseline) exists and was verified locally, not on a host. Model B and the Model C `full` profile are not bundled; a float16 profile is not implemented (the store supports float16, the models write float32). |
-| Visual check of the app in a browser | **Not done.** The browser extension was unavailable in the development environment. The app is tested in-process with Streamlit's `AppTest` against synthetic and real artifacts, and `streamlit run app.py` starts and passes its health check, but the on-screen layout and responsiveness have not been reviewed. |
+| Deployment (SPEC.md Section 15) | **Done, with limited verification.** The app is deployed on Streamlit Community Cloud from a dataset-free hosted bundle (`hosted/`: dashboard results, Model C `dev` artifacts with the ResNet-18 weights, and the classical baseline; Model C `dev` is the default model). The bundle was verified locally against the stored scores, and the deployed Inspect page was inspected from a user-provided screenshot. Memory use on the host, reliability under load and access without a sign-in have not been measured or checked. The local mode (`streamlit run app.py`) remains the primary supported one. Model B and the Model C `full` profile are not bundled; a float16 profile is not implemented (the store supports float16, the models write float32). |
+| Cross-browser and screen-size check of the app | **Not done.** The deployed app's Inspect page was seen in one screenshot only; other pages, other browsers, other screen sizes and light/dark themes were not systematically checked (the browser extension was unavailable in the development environment). The app is tested in-process with Streamlit's `AppTest` against synthetic and real artifacts, and `streamlit run app.py` starts and passes its health check. |
 | Other five VisA objects | Not run (see above). |
 | Added categories fitted on all images | `candle`, `pcb1`, and `pcb2` were fitted on 400 of ~810 images; fits on all images were not run. |
 | Device selection | CPU only by design; `configs/default.yaml` accepts only `device: cpu` and the code never moves tensors to a GPU. |
@@ -86,9 +86,10 @@ claim in the README is read more broadly than the evidence allows.
   separately evaluated calibration step (isotonic regression) so scores could responsibly be shown as
   probabilities; defect-type-stratified labeled calibration using `image_anno.csv`.
 - **Broader evaluation:** the remaining five objects, fits of the added categories on all images, several seeds, and an unseen-category check.
-- **Faster Model C:** a cheaper coreset selection or an approximate nearest-neighbor index (the exact
-  search was kept for clarity and correctness, as SPEC.md asks), and the float16 bank for hosting.
+- **Faster Model C:** the optional `tiled` backend already selects the same coreset 2.4x to 4.6x faster per
+  whole `dev` fit (see [benchmarks.md](benchmarks.md); no `full` benchmark was run). An approximate
+  nearest-neighbor index was deliberately not added, and a float16 bank for hosting is still open.
 - **Finer localisation:** higher-resolution feature maps or multi-scale scoring.
-- **Deployment:** a hosted demo with the lightweight profile, after a browser-based UI review.
+- **Deployment:** a cross-browser UI review, memory and load measurements of the hosted app, and a lightweight hosted profile.
 - **Engineering:** a type checker and CI, and loading the
   classical artifact in `evaluate_model.py`.
