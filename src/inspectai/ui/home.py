@@ -70,7 +70,7 @@ def render() -> None:
 
     st.markdown("### Limitations and intended use")
     st.warning(
-        "Scores are only meaningful if the uploaded object matches the selected category. "
+        "Scores are only meaningful if the object in the image matches the selected category. "
         "This is **not** a certified industrial quality-control system and must not be used for "
         "safety-critical decisions."
     )

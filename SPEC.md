@@ -476,7 +476,7 @@ The application must not show fabricated predictions when a model is missing or 
 Additional requirements for this page:
 
 - Show the score next to the category's threshold and the range (min/median/max) of the `calibration_normal` scores, so users can see how far the score is from normal.
-- Show a warning: "Scores are only meaningful if the uploaded object matches the selected category."
+- Show a warning: "Scores are only meaningful if the object in the image matches the selected category."
 - Maximum upload size is 10 MB (`server.maxUploadSize`), validated before inference.
 - If the local dataset is available, allow choosing a test image from it instead of uploading one.
 

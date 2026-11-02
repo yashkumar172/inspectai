@@ -106,7 +106,7 @@ comparison refusal, and the app's failure paths ([evaluation.md](evaluation.md),
 
 ## 9. Deployment status
 
-**Update after Milestone 7: deployed on Streamlit Community Cloud.** The app was later deployed from the hosted bundle described below (Model C `dev` is the default model, Model A stays selectable). The deployed app was tested manually (a normal and a defective candle image both received the correct decision, and the link opens publicly without signing in); other browsers and screen sizes and the host's memory use under load have not been tested. See [deployment.md](deployment.md). The rest of this section is the state at Milestone 7, when the bundle had been verified locally only.
+**Update after Milestone 7: deployed on Streamlit Community Cloud.** The app was later deployed from the hosted bundle described below (Model C `dev` is the default model, Model A stays selectable). The deployed app was tested manually (bundled sample images (normal and defective, candle and pcb1) and an uploaded image all received the correct decision with the matching ground truth, and the link opens publicly in a private browser window with no sign-in); other browsers and screen sizes and the host's memory use under load have not been tested. See [deployment.md](deployment.md). The rest of this section is the state at Milestone 7, when the bundle had been verified locally only.
 
 **Prepared, not deployed (at Milestone 7).** Deployment (SPEC.md Section 15) is optional. A dataset-free hosted bundle
 (`hosted/`, about 408 MB) holds the dashboard results, the Model C `dev` artifacts for all seven

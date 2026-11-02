@@ -8,7 +8,7 @@ InspectAI finds defective products in photographs, shows where the defect is, an
 
 *Model C (PatchCore-inspired) on a candle image: the score is above the decision threshold, and the heatmap points at the damaged candle in the lower right. Image: VisA (Zou et al., ECCV 2022), CC BY 4.0; resized, heatmap overlay added.*
 
-**Status:** complete and deployed on Streamlit Community Cloud. Model C (dev) is the default; Model A is also selectable. Tested manually on the live app: a normal and a defective candle image both received the correct decision, and the link opens publicly in a private browser window with no sign-in. Not yet tested: other browsers and screen sizes, and the host's memory use under load. This is a research and educational prototype, not a certified quality-control system; see [Limitations](#limitations).
+**Status:** complete and deployed on Streamlit Community Cloud. Model C (dev) is the default; Model A is also selectable. Tested manually on the live app: bundled sample images (normal and defective, candle and pcb1) and an uploaded image all received the correct decision with the matching ground truth, and the link opens publicly in a private browser window with no sign-in. Not yet tested: other browsers and screen sizes, and the host's memory use under load. This is a research and educational prototype, not a certified quality-control system; see [Limitations](#limitations).
 
 ## Key features
 
@@ -197,7 +197,7 @@ The app is deployed on Streamlit Community Cloud from the bundle in `hosted/` (a
 What has and has not been verified:
 
 - **Verified locally:** every bundled artifact passes the artifact store's integrity checks, and scores computed from the bundle alone matched the stored evaluation scores exactly for 28 test images across all seven categories. The 29 bundled sample images are test-split images, and their scores from the bundled Model C `dev` and Model A artifacts equal the saved evaluation scores (relative tolerance 1e-5).
-- **Tested manually on the live app** with normal and defective images; the link opens publicly without signing in.
+- **Tested manually on the live app:** bundled sample images (normal and defective, candle and pcb1) and an uploaded image all received the correct decision with the matching ground truth, and the link opens publicly in a private browser window with no sign-in.
 - **Not verified:** behavior in other browsers or on other screen sizes, and memory use on the host and reliability under load.
 
 Details and the bundle contents are in [docs/deployment.md](docs/deployment.md).

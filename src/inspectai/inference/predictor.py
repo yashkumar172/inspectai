@@ -41,7 +41,7 @@ STATUS_NORMAL = "Normal"
 STATUS_ANOMALY = "Anomaly detected"
 STATUS_UNAVAILABLE = "Model unavailable"
 WRONG_CATEGORY_WARNING = (
-    "Scores are only meaningful if the uploaded object matches the selected category."
+    "Scores are only meaningful if the object in the image matches the selected category."
 )
 NOT_A_PROBABILITY = (
     "The anomaly score is a distance-like value, not a probability of a defect, and its scale "
